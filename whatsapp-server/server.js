@@ -21,14 +21,18 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 
-// Socket.IO setup
+// Socket.IO setup with improved settings for Cloud Run
 const io = new Server(server, {
-  cors: corsOptions
+  cors: corsOptions,
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
 });
 
 // Store WhatsApp clients - supports up to 2 accounts per agency
 const whatsappClients = new Map(); // agencyId_slot -> { client, status, info }
 const activeReplies = new Map(); // chatId -> { userId, userName, timestamp }
+const qrCodeStore = new Map(); // clientId -> qrCode (for immediate retrieval)
 
 // Ensure session directory exists
 const sessionsDir = path.join(__dirname, '.wwebjs_auth');
@@ -36,33 +40,71 @@ if (!fs.existsSync(sessionsDir)) {
   fs.mkdirSync(sessionsDir, { recursive: true });
 }
 
+// Check if running in Cloud Run/Docker
+const isCloudRun = process.env.K_SERVICE || process.env.NODE_ENV === 'production';
+console.log(`Environment: ${isCloudRun ? 'Cloud Run/Production' : 'Local Development'}`);
+
 // Initialize WhatsApp client for a specific agency slot
 function initializeClient(agencyId, slot) {
   const clientId = `${agencyId}_${slot}`;
 
   if (whatsappClients.has(clientId)) {
     const existing = whatsappClients.get(clientId);
-    if (existing.status === 'connected' || existing.status === 'connecting') {
+    if (existing.status === 'connected' || existing.status === 'connecting' || existing.status === 'qr_ready') {
+      console.log(`Client ${clientId} already exists with status: ${existing.status}`);
+
+      // If QR code exists, resend it
+      const storedQr = qrCodeStore.get(clientId);
+      if (storedQr && existing.status === 'qr_ready') {
+        console.log(`Resending stored QR for ${clientId}`);
+        io.to(agencyId).emit('whatsapp:qr', {
+          slot,
+          qrCode: storedQr
+        });
+      }
       return existing;
     }
+    // Clean up old client
+    try {
+      existing.client.destroy().catch(() => {});
+    } catch (e) {}
   }
 
   console.log(`Initializing WhatsApp client for ${clientId}`);
 
+  // Puppeteer configuration for Cloud Run
+  const puppeteerConfig = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--single-process',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--safebrowsing-disable-auto-update'
+    ]
+  };
+
+  // Add executablePath for Cloud Run/Docker
+  if (isCloudRun) {
+    puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+    console.log(`Using Chromium at: ${puppeteerConfig.executablePath}`);
+  }
+
   const client = new Client({
     authStrategy: new LocalAuth({ clientId }),
-    puppeteer: {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
-    }
+    puppeteer: puppeteerConfig
   });
 
   const clientData = {
@@ -81,13 +123,20 @@ function initializeClient(agencyId, slot) {
     clientData.status = 'qr_ready';
 
     try {
-      const qrDataUrl = await QRCode.toDataURL(qr);
+      const qrDataUrl = await QRCode.toDataURL(qr, { width: 256, margin: 2 });
+      const qrBase64 = qrDataUrl.split(',')[1];
+
+      // Store QR code for reconnecting clients
+      qrCodeStore.set(clientId, qrBase64);
+
+      console.log(`Emitting QR code to agency room: ${agencyId}`);
       io.to(agencyId).emit('whatsapp:qr', {
         slot,
-        qrCode: qrDataUrl.split(',')[1] // Send base64 without data URL prefix
+        qrCode: qrBase64
       });
     } catch (err) {
       console.error('QR generation error:', err);
+      io.to(agencyId).emit('whatsapp:error', { error: 'Failed to generate QR code' });
     }
   });
 
@@ -95,6 +144,9 @@ function initializeClient(agencyId, slot) {
   client.on('ready', async () => {
     console.log(`WhatsApp client ${clientId} is ready!`);
     clientData.status = 'connected';
+
+    // Clear stored QR code
+    qrCodeStore.delete(clientId);
 
     try {
       const info = client.info;
@@ -104,6 +156,8 @@ function initializeClient(agencyId, slot) {
         name: info.pushname || info.wid.user,
         platform: info.platform
       };
+
+      console.log(`WhatsApp connected: ${clientData.info.phoneNumber} (${clientData.info.name})`);
 
       io.to(agencyId).emit('whatsapp:connected', {
         slot,
@@ -192,10 +246,24 @@ function initializeClient(agencyId, slot) {
     io.to(agencyId).emit('whatsapp:auth_failure', { slot, message });
   });
 
+  // Loading screen event (helps track initialization progress)
+  client.on('loading_screen', (percent, message) => {
+    console.log(`Loading ${clientId}: ${percent}% - ${message}`);
+  });
+
   // Initialize the client
-  client.initialize().catch(err => {
-    console.error(`Failed to initialize ${clientId}:`, err);
+  console.log(`Starting client initialization for ${clientId}...`);
+  client.initialize().then(() => {
+    console.log(`Client ${clientId} initialized successfully`);
+  }).catch(err => {
+    console.error(`Failed to initialize ${clientId}:`, err.message);
+    console.error('Full error:', err);
     clientData.status = 'disconnected';
+    qrCodeStore.delete(clientId);
+
+    io.to(agencyId).emit('whatsapp:error', {
+      error: `Failed to initialize WhatsApp: ${err.message}`
+    });
   });
 
   return clientData;
@@ -321,8 +389,19 @@ io.on('connection', (socket) => {
 
   // Request QR code to connect
   socket.on('whatsapp:connect', ({ agencyId, slot }) => {
-    console.log(`Connect request for ${agencyId} slot ${slot}`);
-    initializeClient(agencyId, slot);
+    console.log(`=== Connect request received ===`);
+    console.log(`Agency: ${agencyId}, Slot: ${slot}`);
+    console.log(`Socket ID: ${socket.id}, Socket Agency: ${socket.agencyId}`);
+
+    // Use socket's agency if not provided
+    const targetAgencyId = agencyId || socket.agencyId;
+    if (!targetAgencyId) {
+      console.error('No agency ID provided for connect request');
+      socket.emit('whatsapp:error', { error: 'Agency ID is required' });
+      return;
+    }
+
+    initializeClient(targetAgencyId, slot || 1);
   });
 
   // Disconnect WhatsApp
@@ -471,7 +550,22 @@ io.on('connection', (socket) => {
 
 // REST API endpoints for compatibility
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', clients: whatsappClients.size });
+  const clientStatuses = [];
+  for (const [clientId, clientData] of whatsappClients.entries()) {
+    clientStatuses.push({
+      id: clientId,
+      status: clientData.status,
+      hasQR: qrCodeStore.has(clientId)
+    });
+  }
+
+  res.json({
+    status: 'ok',
+    environment: isCloudRun ? 'cloud-run' : 'local',
+    clients: whatsappClients.size,
+    clientStatuses,
+    socketConnections: io.engine.clientsCount
+  });
 });
 
 app.get('/api/status/:agencyId', (req, res) => {
