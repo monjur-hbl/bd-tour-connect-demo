@@ -233,3 +233,110 @@ export interface SeatSelectionState {
   selectedSeats: string[];       // Array of seat IDs
   lockedUntil?: string;          // Temporary lock for checkout
 }
+
+// ============================================
+// WHATSAPP INTEGRATION TYPES
+// ============================================
+
+export type WhatsAppConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'qr_ready';
+export type WhatsAppMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+export type WhatsAppMessageType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contact';
+export type WhatsAppChatType = 'individual' | 'group';
+
+export interface WhatsAppAccount {
+  id: string;
+  phoneNumber: string;
+  name: string;
+  profilePicture?: string;
+  status: WhatsAppConnectionStatus;
+  connectedAt?: string;
+  connectedBy?: string;           // User ID who scanned QR
+  agencyId: string;
+  lastSeen?: string;
+}
+
+export interface WhatsAppContact {
+  id: string;                     // WhatsApp ID (phone@c.us)
+  phoneNumber: string;
+  name: string;
+  pushName?: string;              // Name from WhatsApp profile
+  profilePicture?: string;
+  isBlocked: boolean;
+  isGroup: boolean;
+  lastMessageAt?: string;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  accountId: string;              // Which WhatsApp account
+  chatId: string;                 // Contact/Group ID
+  fromMe: boolean;
+  from: string;
+  to: string;
+  type: WhatsAppMessageType;
+  body: string;
+  caption?: string;               // For media messages
+  mediaUrl?: string;
+  mediaMimeType?: string;
+  mediaFileName?: string;
+  mediaSize?: number;
+  timestamp: string;
+  status: WhatsAppMessageStatus;
+  quotedMessage?: {
+    id: string;
+    body: string;
+    type: WhatsAppMessageType;
+  };
+  isForwarded?: boolean;
+  isStarred?: boolean;
+  // Reply tracking
+  replyingBy?: string;            // User ID who started replying
+  replyingByName?: string;
+  replyingAt?: string;
+}
+
+export interface WhatsAppChat {
+  id: string;                     // Chat ID
+  accountId: string;              // Which WhatsApp account
+  contact: WhatsAppContact;
+  type: WhatsAppChatType;
+  lastMessage?: WhatsAppMessage;
+  unreadCount: number;
+  isPinned: boolean;
+  isMuted: boolean;
+  isArchived: boolean;
+  // Active reply tracking
+  activeReplyBy?: string;
+  activeReplyByName?: string;
+  activeReplyAt?: string;
+}
+
+export interface WhatsAppMediaUpload {
+  file: File;
+  type: WhatsAppMessageType;
+  caption?: string;
+  previewUrl?: string;
+}
+
+export interface WhatsAppNotification {
+  id: string;
+  chatId: string;
+  message: WhatsAppMessage;
+  accountId: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface WhatsAppState {
+  accounts: WhatsAppAccount[];
+  chats: WhatsAppChat[];
+  messages: Record<string, WhatsAppMessage[]>; // chatId -> messages
+  activeChat: string | null;
+  activeAccount: string | null;
+  qrCode: string | null;
+  searchQuery: string;
+  notifications: WhatsAppNotification[];
+  unreadTotal: number;
+  isLoading: boolean;
+  error: string | null;
+}
