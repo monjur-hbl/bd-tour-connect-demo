@@ -6,7 +6,6 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   delay,
-  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers
 } from '@whiskeysockets/baileys';
@@ -15,6 +14,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
+
+// NOTE: Removed fetchLatestBaileysVersion - it causes version mismatch issues
+// WhatsApp may reject sessions when version changes between connections
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,7 +46,8 @@ const io = new Server(server, {
 });
 
 // Session storage - completely isolated per client
-const sessions = new Map(); // clientId -> { sock, status, info, qrCode, reconnecting }
+// Each session now includes contacts and chats for proper sync
+const sessions = new Map(); // clientId -> { sock, status, info, qrCode, reconnecting, contacts, chats }
 
 // Auth directory
 const authDir = path.join(__dirname, 'auth_sessions');
@@ -137,7 +140,7 @@ async function createSession(agencyId, slot) {
     fs.mkdirSync(authPath, { recursive: true });
   }
 
-  // Create session object
+  // Create session object with contacts/chats storage
   const session = {
     sock: null,
     status: 'connecting',
@@ -145,35 +148,42 @@ async function createSession(agencyId, slot) {
     qrCode: null,
     agencyId,
     slot,
-    reconnecting: false
+    reconnecting: false,
+    contacts: new Map(),  // Store synced contacts
+    chats: new Map(),     // Store synced chats
+    syncComplete: false   // Track if initial sync is done
   };
   sessions.set(clientId, session);
 
   try {
-    const { version } = await fetchLatestBaileysVersion();
-    console.log(`Baileys version: ${version.join('.')}`);
+    // Don't fetch latest version - use Baileys built-in version for stability
+    // This prevents WhatsApp from rejecting sessions due to version mismatch
+    console.log(`[${clientId}] Using Baileys built-in version for stability`);
 
     const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     const sock = makeWASocket({
-      version,
+      // Don't pass version - let Baileys use its built-in stable version
       logger,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      // Use proper browser fingerprint to avoid scam warnings
-      browser: Browsers.macOS('Chrome'),
+      // Use stable browser fingerprint - ubuntu/Chrome is most reliable
+      browser: Browsers.ubuntu('Chrome'),
+      // Don't sync full history to avoid timeouts on large accounts
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
       // Keep phone notifications working
       markOnlineOnConnect: false,
-      // Reduce connection issues
+      // Connection settings for stability
       retryRequestDelayMs: 2000,
-      connectTimeoutMs: 60000,
-      qrTimeout: 40000
+      connectTimeoutMs: 120000,  // Increased to 2 minutes
+      qrTimeout: 60000,          // Increased to 1 minute
+      // Keep connection alive
+      keepAliveIntervalMs: 30000
     });
 
     session.sock = sock;
@@ -209,7 +219,30 @@ async function createSession(agencyId, slot) {
 
       // Connection opened
       if (connection === 'open') {
-        console.log(`[${clientId}] Connected!`);
+        console.log(`[${clientId}] Connection opened, validating session...`);
+
+        // Wait a moment to ensure WhatsApp fully accepts the session
+        // This helps detect cases where connection opens but is immediately rejected
+        await delay(2000);
+
+        // Verify we still have a valid socket and user data
+        if (!sock.user) {
+          console.log(`[${clientId}] WARNING: Connection opened but no user data - session may be rejected`);
+          // Don't mark as connected yet, wait for user data
+          session.status = 'validating';
+
+          // Give it more time to get user data
+          await delay(3000);
+
+          if (!sock.user) {
+            console.log(`[${clientId}] Session validation failed - no user data after timeout`);
+            session.status = 'disconnected';
+            io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'session_rejected' });
+            return;
+          }
+        }
+
+        console.log(`[${clientId}] Session validated successfully!`);
         session.status = 'connected';
         session.qrCode = null;
         session.reconnecting = false;
@@ -225,6 +258,9 @@ async function createSession(agencyId, slot) {
 
           console.log(`[${clientId}] Phone: ${session.info.phoneNumber}, Name: ${session.info.name}`);
           io.to(agencyId).emit('whatsapp:connected', { slot, account: session.info });
+
+          // Notify that we're now syncing contacts/chats
+          io.to(agencyId).emit('whatsapp:syncing', { slot, message: 'Syncing contacts and chats...' });
         } catch (err) {
           console.error(`[${clientId}] Error getting user info:`, err.message);
         }
@@ -283,6 +319,160 @@ async function createSession(agencyId, slot) {
 
     // Save credentials on update
     sock.ev.on('creds.update', saveCreds);
+
+    // ========== CONTACTS & CHATS SYNC EVENTS ==========
+    // These are critical for loading chats after QR scan
+
+    // Initial contacts sync (bulk)
+    sock.ev.on('contacts.set', ({ contacts }) => {
+      console.log(`[${clientId}] Contacts sync: received ${contacts.length} contacts`);
+      for (const contact of contacts) {
+        session.contacts.set(contact.id, {
+          id: contact.id,
+          name: contact.name || contact.notify || contact.verifiedName || null,
+          phoneNumber: contact.id.split('@')[0],
+          isGroup: contact.id.endsWith('@g.us')
+        });
+      }
+      console.log(`[${clientId}] Total contacts stored: ${session.contacts.size}`);
+
+      // Emit contacts to frontend
+      io.to(agencyId).emit('whatsapp:contacts_synced', {
+        slot,
+        count: session.contacts.size
+      });
+    });
+
+    // Incremental contact updates
+    sock.ev.on('contacts.upsert', (contacts) => {
+      console.log(`[${clientId}] Contacts upsert: ${contacts.length} contacts`);
+      for (const contact of contacts) {
+        session.contacts.set(contact.id, {
+          id: contact.id,
+          name: contact.name || contact.notify || contact.verifiedName || null,
+          phoneNumber: contact.id.split('@')[0],
+          isGroup: contact.id.endsWith('@g.us')
+        });
+      }
+    });
+
+    // Contact updates (name changes, etc.)
+    sock.ev.on('contacts.update', (updates) => {
+      for (const update of updates) {
+        const existing = session.contacts.get(update.id);
+        if (existing) {
+          session.contacts.set(update.id, {
+            ...existing,
+            name: update.name || update.notify || existing.name
+          });
+        }
+      }
+    });
+
+    // Initial chats sync (bulk)
+    sock.ev.on('chats.set', ({ chats }) => {
+      console.log(`[${clientId}] Chats sync: received ${chats.length} chats`);
+      for (const chat of chats) {
+        session.chats.set(chat.id, {
+          id: chat.id,
+          name: chat.name || null,
+          unreadCount: chat.unreadCount || 0,
+          conversationTimestamp: chat.conversationTimestamp,
+          pinned: chat.pinned,
+          archived: chat.archived,
+          muted: chat.mute
+        });
+      }
+      console.log(`[${clientId}] Total chats stored: ${session.chats.size}`);
+
+      // Mark sync as complete
+      session.syncComplete = true;
+
+      // Emit to frontend
+      io.to(agencyId).emit('whatsapp:chats_synced', {
+        slot,
+        count: session.chats.size
+      });
+    });
+
+    // Incremental chat updates
+    sock.ev.on('chats.upsert', (chats) => {
+      console.log(`[${clientId}] Chats upsert: ${chats.length} chats`);
+      for (const chat of chats) {
+        session.chats.set(chat.id, {
+          id: chat.id,
+          name: chat.name || session.chats.get(chat.id)?.name || null,
+          unreadCount: chat.unreadCount || 0,
+          conversationTimestamp: chat.conversationTimestamp,
+          pinned: chat.pinned,
+          archived: chat.archived,
+          muted: chat.mute
+        });
+      }
+    });
+
+    // Chat updates (read status, archive, etc.)
+    sock.ev.on('chats.update', (updates) => {
+      for (const update of updates) {
+        const existing = session.chats.get(update.id);
+        if (existing) {
+          session.chats.set(update.id, {
+            ...existing,
+            ...update,
+            name: update.name || existing.name
+          });
+        }
+      }
+    });
+
+    // Chat deletion
+    sock.ev.on('chats.delete', (deletedIds) => {
+      console.log(`[${clientId}] Chats deleted: ${deletedIds.length}`);
+      for (const id of deletedIds) {
+        session.chats.delete(id);
+      }
+    });
+
+    // Messaging history sync (for full history if enabled)
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+      console.log(`[${clientId}] History sync: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
+
+      // Store contacts from history
+      if (contacts) {
+        for (const contact of contacts) {
+          session.contacts.set(contact.id, {
+            id: contact.id,
+            name: contact.name || contact.notify || null,
+            phoneNumber: contact.id.split('@')[0],
+            isGroup: contact.id.endsWith('@g.us')
+          });
+        }
+      }
+
+      // Store chats from history
+      if (chats) {
+        for (const chat of chats) {
+          session.chats.set(chat.id, {
+            id: chat.id,
+            name: chat.name || null,
+            unreadCount: chat.unreadCount || 0,
+            conversationTimestamp: chat.conversationTimestamp
+          });
+        }
+      }
+
+      if (isLatest) {
+        session.syncComplete = true;
+        console.log(`[${clientId}] Sync complete: ${session.contacts.size} contacts, ${session.chats.size} chats`);
+        io.to(agencyId).emit('whatsapp:sync_complete', {
+          slot,
+          contactsCount: session.contacts.size,
+          chatsCount: session.chats.size
+        });
+      }
+    });
+
+    // ========== END CONTACTS & CHATS SYNC EVENTS ==========
 
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -492,22 +682,105 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const groups = await session.sock.groupFetchAllParticipating();
-      const chatList = Object.values(groups || {}).slice(0, 100).map(chat => ({
-        id: chat.id,
-        accountId: clientId,
-        contact: {
-          id: chat.id,
-          phoneNumber: chat.id.split('@')[0],
-          name: chat.subject || chat.name || chat.id.split('@')[0],
-          isGroup: chat.id.endsWith('@g.us')
-        },
-        type: chat.id.endsWith('@g.us') ? 'group' : 'individual',
-        unreadCount: 0,
-        isPinned: false,
-        isMuted: false,
-        isArchived: false
-      }));
+      console.log(`[${clientId}] Fetching chats - contacts: ${session.contacts.size}, chats: ${session.chats.size}`);
+
+      // Get groups from WhatsApp
+      let groups = {};
+      try {
+        groups = await session.sock.groupFetchAllParticipating();
+      } catch (groupErr) {
+        console.log(`[${clientId}] Could not fetch groups: ${groupErr.message}`);
+      }
+
+      // Build chat list from multiple sources
+      const chatMap = new Map();
+
+      // 1. Add groups from groupFetchAllParticipating
+      for (const group of Object.values(groups || {})) {
+        chatMap.set(group.id, {
+          id: group.id,
+          accountId: clientId,
+          contact: {
+            id: group.id,
+            phoneNumber: group.id.split('@')[0],
+            name: group.subject || group.name || 'Unknown Group',
+            isGroup: true
+          },
+          type: 'group',
+          unreadCount: 0,
+          isPinned: false,
+          isMuted: false,
+          isArchived: false
+        });
+      }
+
+      // 2. Add individual contacts from synced contacts
+      for (const [contactId, contact] of session.contacts.entries()) {
+        // Skip groups (already handled above) and broadcast
+        if (contactId.endsWith('@g.us') || contactId === 'status@broadcast') continue;
+
+        // Only add if not already in the map
+        if (!chatMap.has(contactId)) {
+          chatMap.set(contactId, {
+            id: contactId,
+            accountId: clientId,
+            contact: {
+              id: contactId,
+              phoneNumber: contact.phoneNumber,
+              name: contact.name || contact.phoneNumber,
+              isGroup: false
+            },
+            type: 'individual',
+            unreadCount: 0,
+            isPinned: false,
+            isMuted: false,
+            isArchived: false
+          });
+        }
+      }
+
+      // 3. Add chats from synced chats (these have conversation history)
+      for (const [chatId, chat] of session.chats.entries()) {
+        if (chatId === 'status@broadcast') continue;
+
+        const isGroup = chatId.endsWith('@g.us');
+        const existing = chatMap.get(chatId);
+
+        if (existing) {
+          // Update with chat metadata
+          existing.unreadCount = chat.unreadCount || 0;
+          existing.isPinned = chat.pinned || false;
+          existing.isMuted = chat.muted || false;
+          existing.isArchived = chat.archived || false;
+          existing.lastMessageTimestamp = chat.conversationTimestamp;
+        } else {
+          // Add new chat entry
+          const contact = session.contacts.get(chatId);
+          chatMap.set(chatId, {
+            id: chatId,
+            accountId: clientId,
+            contact: {
+              id: chatId,
+              phoneNumber: chatId.split('@')[0],
+              name: contact?.name || chat.name || chatId.split('@')[0],
+              isGroup
+            },
+            type: isGroup ? 'group' : 'individual',
+            unreadCount: chat.unreadCount || 0,
+            isPinned: chat.pinned || false,
+            isMuted: chat.muted || false,
+            isArchived: chat.archived || false,
+            lastMessageTimestamp: chat.conversationTimestamp
+          });
+        }
+      }
+
+      // Convert to array and sort by last message timestamp (recent first)
+      const chatList = Array.from(chatMap.values())
+        .sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0))
+        .slice(0, 200); // Limit to 200 chats
+
+      console.log(`[${clientId}] Returning ${chatList.length} chats (${chatList.filter(c => c.type === 'group').length} groups, ${chatList.filter(c => c.type === 'individual').length} individuals)`);
 
       socket.emit('whatsapp:chats', { slot, chats: chatList });
     } catch (err) {
@@ -550,13 +823,16 @@ app.get('/api/health', (req, res) => {
       id,
       status: session.status,
       hasQR: !!session.qrCode,
-      hasInfo: !!session.info
+      hasInfo: !!session.info,
+      contactsCount: session.contacts?.size || 0,
+      chatsCount: session.chats?.size || 0,
+      syncComplete: session.syncComplete || false
     });
   }
 
   res.json({
     status: 'ok',
-    version: '2.2.0',
+    version: '2.3.0',  // Updated version with contact/chat sync fixes
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
@@ -584,7 +860,12 @@ app.get('/api/sessions/:agencyId', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server v2.2.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server v2.3.0 running on port ${PORT}`);
+  console.log('Fixes included:');
+  console.log('  - Removed fetchLatestBaileysVersion for stable connections');
+  console.log('  - Added contacts/chats sync event listeners');
+  console.log('  - Connection validation after QR scan');
+  console.log('  - fetch_chats now returns individuals + groups');
 });
 
 // Graceful shutdown
