@@ -7,7 +7,8 @@ import makeWASocket, {
   DisconnectReason,
   delay,
   fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore
+  makeCacheableSignalKeyStore,
+  Browsers
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import path from 'path';
@@ -162,13 +163,17 @@ async function createSession(agencyId, slot) {
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      browser: [`BD Tour ${slot}`, 'Chrome', '1.0.0'],
+      // Use proper browser fingerprint to avoid scam warnings
+      browser: Browsers.macOS('Chrome'),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
-      // Prevent conflicts
+      // Keep phone notifications working
       markOnlineOnConnect: false,
-      retryRequestDelayMs: 2000
+      // Reduce connection issues
+      retryRequestDelayMs: 2000,
+      connectTimeoutMs: 60000,
+      qrTimeout: 40000
     });
 
     session.sock = sock;
@@ -281,13 +286,17 @@ async function createSession(agencyId, slot) {
 
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      console.log(`[${clientId}] Messages upsert: type=${type}, count=${messages.length}`);
 
+      // Handle all message types, not just 'notify'
       for (const msg of messages) {
-        if (msg.key.fromMe) continue;
+        // Skip status broadcasts
+        if (msg.key.remoteJid === 'status@broadcast') continue;
 
         try {
           const content = msg.message;
+          if (!content) continue;
+
           let body = '';
           let msgType = 'text';
 
@@ -307,6 +316,15 @@ async function createSession(agencyId, slot) {
           } else if (content?.documentMessage) {
             msgType = 'document';
             body = content.documentMessage.fileName || '[Document]';
+          } else if (content?.stickerMessage) {
+            msgType = 'sticker';
+            body = '[Sticker]';
+          } else if (content?.contactMessage) {
+            msgType = 'contact';
+            body = content.contactMessage.displayName || '[Contact]';
+          } else if (content?.locationMessage) {
+            msgType = 'location';
+            body = '[Location]';
           } else {
             body = '[Message]';
           }
@@ -315,25 +333,52 @@ async function createSession(agencyId, slot) {
             id: msg.key.id,
             accountId: clientId,
             chatId: msg.key.remoteJid,
-            fromMe: false,
+            fromMe: msg.key.fromMe || false,
             type: msgType,
             body,
             timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-            status: 'delivered'
+            status: msg.key.fromMe ? 'sent' : 'delivered',
+            senderName: msg.pushName || null
           };
 
+          console.log(`[${clientId}] Message: ${formattedMsg.fromMe ? 'OUT' : 'IN'} - ${body.substring(0, 50)}`);
+
           io.to(agencyId).emit('whatsapp:message', { slot, message: formattedMsg });
-          io.to(agencyId).emit('whatsapp:notification', {
-            slot,
-            chatId: msg.key.remoteJid,
-            message: formattedMsg,
-            contact: {
-              name: msg.pushName || msg.key.remoteJid.split('@')[0],
-              phoneNumber: msg.key.remoteJid.split('@')[0]
-            }
-          });
+
+          // Only send notification for incoming messages
+          if (!msg.key.fromMe) {
+            io.to(agencyId).emit('whatsapp:notification', {
+              slot,
+              chatId: msg.key.remoteJid,
+              message: formattedMsg,
+              contact: {
+                name: msg.pushName || msg.key.remoteJid.split('@')[0],
+                phoneNumber: msg.key.remoteJid.split('@')[0]
+              }
+            });
+          }
         } catch (err) {
           console.error(`[${clientId}] Message processing error:`, err.message);
+        }
+      }
+    });
+
+    // Handle message status updates (read receipts, delivery)
+    sock.ev.on('messages.update', (updates) => {
+      for (const update of updates) {
+        if (update.update?.status) {
+          const statusMap = {
+            1: 'pending',
+            2: 'sent',
+            3: 'delivered',
+            4: 'read'
+          };
+          io.to(agencyId).emit('whatsapp:message_status', {
+            slot,
+            messageId: update.key.id,
+            chatId: update.key.remoteJid,
+            status: statusMap[update.update.status] || 'sent'
+          });
         }
       }
     });
@@ -471,6 +516,27 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('whatsapp:fetch_messages', async ({ agencyId, slot, chatId, limit = 50 }) => {
+    const clientId = `${agencyId}_${slot}`;
+    const session = sessions.get(clientId);
+
+    if (!session?.sock || session.status !== 'connected') {
+      socket.emit('whatsapp:error', { error: 'WhatsApp not connected' });
+      return;
+    }
+
+    try {
+      console.log(`[${clientId}] Fetching messages for chat: ${chatId}`);
+      // Note: Baileys doesn't have a direct fetchMessages method
+      // Messages are received via messages.upsert event
+      // We can only acknowledge we're ready to receive for this chat
+      socket.emit('whatsapp:messages', { slot, chatId, messages: [] });
+    } catch (err) {
+      console.error(`[${clientId}] Fetch messages failed:`, err.message);
+      socket.emit('whatsapp:error', { error: 'Failed to fetch messages' });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Socket disconnected:', socket.id);
   });
@@ -490,7 +556,7 @@ app.get('/api/health', (req, res) => {
 
   res.json({
     status: 'ok',
-    version: '2.1.0',
+    version: '2.2.0',
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
@@ -518,7 +584,7 @@ app.get('/api/sessions/:agencyId', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server v2.1.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server v2.2.0 running on port ${PORT}`);
 });
 
 // Graceful shutdown
