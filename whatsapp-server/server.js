@@ -73,7 +73,12 @@ async function initializeClient(agencyId, slot) {
   if (whatsappClients.has(clientId)) {
     const existing = whatsappClients.get(clientId);
     if (existing.status === 'connected') {
-      console.log(`Client ${clientId} already connected`);
+      console.log(`Client ${clientId} already connected, emitting status`);
+      // Emit connected status to all clients in the room
+      io.to(agencyId).emit('whatsapp:connected', {
+        slot,
+        account: existing.info
+      });
       return existing;
     }
     if (existing.status === 'qr_ready') {
@@ -82,6 +87,10 @@ async function initializeClient(agencyId, slot) {
         console.log(`Resending stored QR for ${clientId}`);
         io.to(agencyId).emit('whatsapp:qr', { slot, qrCode: storedQr });
       }
+      return existing;
+    }
+    if (existing.status === 'connecting') {
+      console.log(`Client ${clientId} is connecting, waiting for QR...`);
       return existing;
     }
     // Close existing connection if any
@@ -329,14 +338,36 @@ io.on('connection', (socket) => {
     socket.agencyId = agencyId;
     console.log(`Socket ${socket.id} joined agency ${agencyId}`);
 
-    // Send current statuses
+    // Send current statuses for all clients in this agency
     for (const [clientId, clientData] of whatsappClients.entries()) {
       if (clientData.agencyId === agencyId) {
+        console.log(`Sending status for ${clientId}: ${clientData.status}`);
+
+        // Send status update
         socket.emit('whatsapp:status', {
           slot: clientData.slot,
           status: clientData.status,
           account: clientData.info
         });
+
+        // If connected, also emit connected event
+        if (clientData.status === 'connected' && clientData.info) {
+          socket.emit('whatsapp:connected', {
+            slot: clientData.slot,
+            account: clientData.info
+          });
+        }
+
+        // If QR is ready, send it
+        if (clientData.status === 'qr_ready') {
+          const storedQr = qrCodeStore.get(clientId);
+          if (storedQr) {
+            socket.emit('whatsapp:qr', {
+              slot: clientData.slot,
+              qrCode: storedQr
+            });
+          }
+        }
       }
     }
   });
