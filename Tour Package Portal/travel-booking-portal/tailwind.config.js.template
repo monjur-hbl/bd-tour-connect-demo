@@ -1,0 +1,326 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+    "./public/index.html"
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // Primary - Sunset Orange (Travel & Adventure)
+        primary: {
+          50: '#FFF7ED',
+          100: '#FFEDD5',
+          200: '#FED7AA',
+          300: '#FDBA74',
+          400: '#FB923C',
+          500: '#F97316',   // Main Primary
+          600: '#EA580C',
+          700: '#C2410C',
+          800: '#9A3412',
+          900: '#7C2D12',
+        },
+        // Secondary - Ocean Blue (Trust & Reliability)
+        secondary: {
+          50: '#EFF6FF',
+          100: '#DBEAFE',
+          200: '#BFDBFE',
+          300: '#93C5FD',
+          400: '#60A5FA',
+          500: '#3B82F6',   // Main Secondary
+          600: '#2563EB',
+          700: '#1D4ED8',
+          800: '#1E40AF',
+          900: '#1E3A8A',
+        },
+        // Accent - Tropical Teal (Nature & Fresh)
+        accent: {
+          50: '#F0FDFA',
+          100: '#CCFBF1',
+          200: '#99F6E4',
+          300: '#5EEAD4',
+          400: '#2DD4BF',
+          500: '#14B8A6',   // Main Accent
+          600: '#0D9488',
+          700: '#0F766E',
+          800: '#115E59',
+          900: '#134E4A',
+        },
+        // Success - Palm Green
+        success: {
+          50: '#F0FDF4',
+          100: '#DCFCE7',
+          200: '#BBF7D0',
+          300: '#86EFAC',
+          400: '#4ADE80',
+          500: '#22C55E',   // Main Success
+          600: '#16A34A',
+          700: '#15803D',
+          800: '#166534',
+          900: '#14532D',
+        },
+        // Warning - Golden Sun
+        warning: {
+          50: '#FFFBEB',
+          100: '#FEF3C7',
+          200: '#FDE68A',
+          300: '#FCD34D',
+          400: '#FBBF24',
+          500: '#F59E0B',   // Main Warning
+          600: '#D97706',
+          700: '#B45309',
+          800: '#92400E',
+          900: '#78350F',
+        },
+        // Danger - Coral Red
+        danger: {
+          50: '#FEF2F2',
+          100: '#FEE2E2',
+          200: '#FECACA',
+          300: '#FCA5A5',
+          400: '#F87171',
+          500: '#EF4444',   // Main Danger
+          600: '#DC2626',
+          700: '#B91C1C',
+          800: '#991B1B',
+          900: '#7F1D1D',
+        },
+        // Neutral - Sand (Warm Neutrals)
+        sand: {
+          50: '#FAFAF9',
+          100: '#F5F5F4',
+          200: '#E7E5E4',
+          300: '#D6D3D1',
+          400: '#A8A29E',
+          500: '#78716C',
+          600: '#57534E',
+          700: '#44403C',
+          800: '#292524',
+          900: '#1C1917',
+        },
+      },
+      fontFamily: {
+        'display': ['Poppins', 'sans-serif'],
+        'bengali': ['Noto Sans Bengali', 'sans-serif'],
+        'body': ['Inter', 'sans-serif'],
+      },
+      backgroundImage: {
+        // Gradient backgrounds for festive look
+        'gradient-festive': 'linear-gradient(135deg, #F97316 0%, #FB923C 50%, #FDBA74 100%)',
+        'gradient-ocean': 'linear-gradient(135deg, #3B82F6 0%, #60A5FA 50%, #93C5FD 100%)',
+        'gradient-sunset': 'linear-gradient(180deg, #F97316 0%, #EA580C 50%, #DC2626 100%)',
+        'gradient-tropical': 'linear-gradient(135deg, #14B8A6 0%, #2DD4BF 50%, #5EEAD4 100%)',
+        'gradient-warm': 'linear-gradient(135deg, #F97316 0%, #F59E0B 100%)',
+        'gradient-cool': 'linear-gradient(135deg, #3B82F6 0%, #14B8A6 100%)',
+        // Card backgrounds
+        'gradient-card-primary': 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+        'gradient-card-secondary': 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+        'gradient-card-accent': 'linear-gradient(135deg, #14B8A6 0%, #0D9488 100%)',
+        'gradient-card-success': 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
+        // Hero/Banner backgrounds
+        'hero-beach': 'url("/assets/beach-pattern.svg")',
+        'hero-travel': 'url("/assets/travel-pattern.svg")',
+      },
+      boxShadow: {
+        // Custom shadows for festive look
+        'festive': '0 4px 20px rgba(249, 115, 22, 0.25)',
+        'festive-lg': '0 10px 40px rgba(249, 115, 22, 0.3)',
+        'ocean': '0 4px 20px rgba(59, 130, 246, 0.25)',
+        'ocean-lg': '0 10px 40px rgba(59, 130, 246, 0.3)',
+        'card': '0 2px 12px rgba(0, 0, 0, 0.08)',
+        'card-hover': '0 8px 25px rgba(0, 0, 0, 0.12)',
+        'card-lg': '0 12px 35px rgba(0, 0, 0, 0.1)',
+        'inner-soft': 'inset 0 2px 4px rgba(0, 0, 0, 0.06)',
+      },
+      borderRadius: {
+        '4xl': '2rem',
+        '5xl': '2.5rem',
+      },
+      animation: {
+        'float': 'float 3s ease-in-out infinite',
+        'float-slow': 'float 5s ease-in-out infinite',
+        'pulse-soft': 'pulse-soft 2s ease-in-out infinite',
+        'slide-up': 'slide-up 0.3s ease-out',
+        'slide-down': 'slide-down 0.3s ease-out',
+        'slide-left': 'slide-left 0.3s ease-out',
+        'slide-right': 'slide-right 0.3s ease-out',
+        'fade-in': 'fade-in 0.2s ease-out',
+        'fade-out': 'fade-out 0.2s ease-out',
+        'scale-in': 'scale-in 0.2s ease-out',
+        'scale-out': 'scale-out 0.2s ease-out',
+        'bounce-soft': 'bounce-soft 0.5s ease-in-out',
+        'wiggle': 'wiggle 0.5s ease-in-out',
+        'spin-slow': 'spin 3s linear infinite',
+        'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+      },
+      keyframes: {
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+        'pulse-soft': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.7' },
+        },
+        'slide-up': {
+          '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        'slide-down': {
+          '0%': { transform: 'translateY(-10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        'slide-left': {
+          '0%': { transform: 'translateX(10px)', opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        'slide-right': {
+          '0%': { transform: 'translateX(-10px)', opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'fade-out': {
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
+        },
+        'scale-in': {
+          '0%': { transform: 'scale(0.95)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        'scale-out': {
+          '0%': { transform: 'scale(1)', opacity: '1' },
+          '100%': { transform: 'scale(0.95)', opacity: '0' },
+        },
+        'bounce-soft': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-5px)' },
+        },
+        wiggle: {
+          '0%, 100%': { transform: 'rotate(-3deg)' },
+          '50%': { transform: 'rotate(3deg)' },
+        },
+      },
+      transitionTimingFunction: {
+        'bounce-in': 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+        'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
+      },
+      spacing: {
+        '18': '4.5rem',
+        '88': '22rem',
+        '100': '25rem',
+        '112': '28rem',
+        '128': '32rem',
+      },
+      zIndex: {
+        '60': '60',
+        '70': '70',
+        '80': '80',
+        '90': '90',
+        '100': '100',
+      },
+      screens: {
+        'xs': '475px',
+        '3xl': '1920px',
+      },
+    },
+  },
+  plugins: [
+    require('@tailwindcss/forms')({
+      strategy: 'class',
+    }),
+    require('@tailwindcss/typography'),
+    // Custom plugin for festive utilities
+    function({ addUtilities, addComponents }) {
+      const newUtilities = {
+        '.text-gradient-festive': {
+          'background': 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+          '-webkit-background-clip': 'text',
+          '-webkit-text-fill-color': 'transparent',
+          'background-clip': 'text',
+        },
+        '.text-gradient-ocean': {
+          'background': 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+          '-webkit-background-clip': 'text',
+          '-webkit-text-fill-color': 'transparent',
+          'background-clip': 'text',
+        },
+        '.safe-area-inset-top': {
+          'padding-top': 'env(safe-area-inset-top)',
+        },
+        '.safe-area-inset-bottom': {
+          'padding-bottom': 'env(safe-area-inset-bottom)',
+        },
+        '.scrollbar-hide': {
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none',
+          '&::-webkit-scrollbar': {
+            display: 'none',
+          },
+        },
+        '.scrollbar-thin': {
+          'scrollbar-width': 'thin',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+            height: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            background: '#F5F5F4',
+            'border-radius': '3px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            background: '#A8A29E',
+            'border-radius': '3px',
+            '&:hover': {
+              background: '#78716C',
+            },
+          },
+        },
+      };
+      
+      const newComponents = {
+        '.btn-primary': {
+          '@apply px-6 py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white font-semibold rounded-xl shadow-md shadow-primary-500/25 hover:shadow-lg hover:shadow-primary-500/30 hover:from-primary-600 hover:to-primary-700 active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed': {},
+        },
+        '.btn-secondary': {
+          '@apply px-6 py-3 bg-white border-2 border-primary-500 text-primary-600 font-semibold rounded-xl hover:bg-primary-50 active:scale-[0.98] transition-all duration-200': {},
+        },
+        '.btn-ghost': {
+          '@apply px-6 py-3 text-primary-600 font-medium rounded-xl hover:bg-primary-50 transition-all duration-200': {},
+        },
+        '.btn-danger': {
+          '@apply px-6 py-3 bg-gradient-to-r from-danger-500 to-danger-600 text-white font-semibold rounded-xl shadow-md shadow-danger-500/25 hover:shadow-lg transition-all duration-200': {},
+        },
+        '.card': {
+          '@apply bg-white rounded-2xl shadow-card overflow-hidden': {},
+        },
+        '.card-hover': {
+          '@apply bg-white rounded-2xl shadow-card overflow-hidden hover:shadow-card-hover transition-shadow duration-300': {},
+        },
+        '.input-field': {
+          '@apply w-full px-4 py-3 border-2 border-sand-200 rounded-xl text-sand-800 placeholder:text-sand-400 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 transition-all duration-200': {},
+        },
+        '.heading-hero': {
+          '@apply text-4xl md:text-5xl font-bold font-display leading-tight': {},
+        },
+        '.heading-xl': {
+          '@apply text-3xl md:text-4xl font-bold font-display': {},
+        },
+        '.heading-lg': {
+          '@apply text-2xl md:text-3xl font-bold font-display': {},
+        },
+        '.heading-md': {
+          '@apply text-xl md:text-2xl font-semibold font-display': {},
+        },
+        '.heading-sm': {
+          '@apply text-lg md:text-xl font-semibold font-display': {},
+        },
+      };
+      
+      addUtilities(newUtilities);
+      addComponents(newComponents);
+    },
+  ],
+};

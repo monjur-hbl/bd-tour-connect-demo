@@ -9,8 +9,19 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 // Pages
 import { LoginPage } from './pages/auth/LoginPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AgenciesManagement } from './pages/admin/AgenciesManagement';
+import { UsersManagement } from './pages/admin/UsersManagement';
+import { PlatformReports } from './pages/admin/PlatformReports';
 import { AgencyDashboard } from './pages/agency/AgencyDashboard';
+import { AgencySettings } from './pages/agency/AgencySettings';
+import { AgentManagement } from './pages/agency/AgentManagement';
+import { PackageManagement } from './pages/agency/PackageManagement';
+import { BookingsManagement } from './pages/agency/BookingsManagement';
 import { AgentDashboard } from './pages/agent/AgentDashboard';
+import { AvailablePackages } from './pages/agent/AvailablePackages';
+import { MyBookings } from './pages/agent/MyBookings';
+import { NewBooking } from './pages/agent/NewBooking';
+import { ProfileSettings } from './pages/settings/ProfileSettings';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{
@@ -32,17 +43,6 @@ const ProtectedRoute: React.FC<{
 
   return <>{children}</>;
 };
-
-// Placeholder pages for additional routes
-const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
-  <div className="flex items-center justify-center h-[60vh]">
-    <div className="text-center">
-      <h1 className="text-2xl font-bold text-sand-800 mb-2">{title}</h1>
-      <p className="text-sand-500">This page is under development</p>
-      <p className="text-sand-400 font-bengali text-sm mt-1">এই পেজটি নির্মাণাধীন</p>
-    </div>
-  </div>
-);
 
 const App: React.FC = () => {
   return (
@@ -73,9 +73,10 @@ const App: React.FC = () => {
           }
         >
           <Route index element={<AdminDashboard />} />
-          <Route path="agencies" element={<PlaceholderPage title="Manage Agencies" />} />
-          <Route path="users" element={<PlaceholderPage title="Manage Users" />} />
-          <Route path="reports" element={<PlaceholderPage title="Platform Reports" />} />
+          <Route path="agencies" element={<AgenciesManagement />} />
+          <Route path="users" element={<UsersManagement />} />
+          <Route path="reports" element={<PlatformReports />} />
+          <Route path="profile" element={<ProfileSettings />} />
         </Route>
 
         {/* Agency Routes */}
@@ -88,10 +89,11 @@ const App: React.FC = () => {
           }
         >
           <Route index element={<AgencyDashboard />} />
-          <Route path="packages" element={<PlaceholderPage title="Manage Packages" />} />
-          <Route path="bookings" element={<PlaceholderPage title="All Bookings" />} />
-          <Route path="agents" element={<PlaceholderPage title="Manage Agents" />} />
-          <Route path="messages" element={<PlaceholderPage title="Messaging Hub" />} />
+          <Route path="packages" element={<PackageManagement />} />
+          <Route path="bookings" element={<BookingsManagement />} />
+          <Route path="agents" element={<AgentManagement />} />
+          <Route path="settings" element={<AgencySettings />} />
+          <Route path="profile" element={<ProfileSettings />} />
         </Route>
 
         {/* Agent Routes */}
@@ -104,9 +106,10 @@ const App: React.FC = () => {
           }
         >
           <Route index element={<AgentDashboard />} />
-          <Route path="packages" element={<PlaceholderPage title="Available Packages" />} />
-          <Route path="bookings" element={<PlaceholderPage title="My Bookings" />} />
-          <Route path="new-booking" element={<PlaceholderPage title="Create New Booking" />} />
+          <Route path="packages" element={<AvailablePackages />} />
+          <Route path="bookings" element={<MyBookings />} />
+          <Route path="new-booking" element={<NewBooking />} />
+          <Route path="profile" element={<ProfileSettings />} />
         </Route>
 
         {/* Default Redirect */}

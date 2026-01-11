@@ -1,0 +1,12 @@
+name = "bd-tour-connect-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[vars]
+ENVIRONMENT = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bd-tour-connect-db"
+database_id = "edf51725-8773-47ff-83a8-8b1ecd9f6e7b"

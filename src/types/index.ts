@@ -65,6 +65,9 @@ export interface TourPackage {
   status: 'draft' | 'current' | 'future' | 'past' | 'cancelled';
   coverImage?: string;
   createdAt: string;
+  // Bus seat layout configuration
+  busConfiguration?: BusConfiguration;
+  seatLayout?: SeatLayout;
 }
 
 export interface BoardingPoint {
@@ -131,4 +134,90 @@ export interface AuthState {
   isLoading: boolean;
   login: (phone: string, password: string) => Promise<boolean>;
   logout: () => void;
+}
+
+// ============================================
+// BUS SEAT LAYOUT TYPES
+// ============================================
+
+export type SeatArrangement = '2x2' | '2x1' | '1x1' | '2x3' | '3x2';
+export type ACType = 'ac' | 'non_ac';
+export type BusBrand = 'hino' | 'mercedes' | 'volvo' | 'scania' | 'ashok_leyland' | 'other';
+export type VehicleCategory = 'bus' | 'microbus' | 'hiace' | 'car';
+export type SeatStatus = 'available' | 'booked' | 'blocked' | 'selected' | 'sold';
+export type PassengerGender = 'male' | 'female' | 'other';
+
+export interface SeatPosition {
+  row: string;        // A, B, C, ... K
+  column: number;     // 1, 2, 3, 4
+}
+
+export interface Seat {
+  id: string;                    // e.g., "L-A1", "U-B2"
+  deck: 'lower' | 'upper';
+  position: SeatPosition;
+  label: string;                 // Display label e.g., "A1", "B2"
+  status: SeatStatus;
+  bookedBy?: {
+    bookingId: string;
+    passengerName: string;
+    gender: PassengerGender;
+  };
+  blockedReason?: string;        // "Damaged", "Staff Reserved", etc.
+}
+
+export interface FloorConfiguration {
+  arrangement: SeatArrangement;
+  serialStart: string;           // A
+  serialEnd: string;             // K
+  seatsPerSerial: number;        // How many seats per row (e.g., 4 for 2x2)
+  firstRowLayout?: SeatArrangement;  // Can be different
+  firstRowSeats?: number;        // Override for first row
+  lastRowLayout?: SeatArrangement;   // Usually 5-seater for buses
+  lastRowSeats?: number;         // Override for last row
+}
+
+export interface BusConfiguration {
+  id: string;
+  vehicleCategory: VehicleCategory;
+  numberOfFloors: 1 | 2;         // Single deck or Double decker
+  acType: ACType;
+  brand: BusBrand;
+  brandOther?: string;           // If brand is 'other'
+  modelName?: string;
+  lowerDeck: FloorConfiguration;
+  upperDeck?: FloorConfiguration; // Only if numberOfFloors === 2
+  totalSeats: number;            // Calculated from configuration
+}
+
+export interface SeatLayout {
+  packageId: string;
+  busConfiguration: BusConfiguration;
+  seats: Seat[];
+  lastUpdated: string;
+}
+
+// Extended Passenger interface with seat and gender
+export interface PassengerWithSeat extends Passenger {
+  seatId: string;                // Reference to Seat.id
+  gender: PassengerGender;
+  boardingPointId?: string;
+  droppingPointId?: string;
+  customDroppingPoint?: string;  // For mid-way drop-offs
+}
+
+// Real-time seat update event
+export interface SeatUpdateEvent {
+  packageId: string;
+  seatId: string;
+  status: SeatStatus;
+  bookedBy?: Seat['bookedBy'];
+  timestamp: string;
+}
+
+// Seat selection state for booking flow
+export interface SeatSelectionState {
+  packageId: string;
+  selectedSeats: string[];       // Array of seat IDs
+  lockedUntil?: string;          // Temporary lock for checkout
 }

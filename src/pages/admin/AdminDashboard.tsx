@@ -1,12 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../../components/common/Card';
 import { StatCard } from '../../components/common/StatCard';
-import { DEMO_STATS, DEMO_AGENCIES, formatCurrency } from '../../data/demoData';
+import { statsAPI, agenciesAPI } from '../../services/api';
+
+const formatCurrency = (amount: number): string => `৳${amount.toLocaleString('en-BD')}`;
 
 export const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
-  const stats = DEMO_STATS['system_admin'];
+  const [stats, setStats] = useState<any>({});
+  const [agencies, setAgencies] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [statsData, agenciesData] = await Promise.all([
+          statsAPI.get({ role: 'system_admin' }),
+          agenciesAPI.getAll()
+        ]);
+        setStats(statsData.stats);
+        setAgencies(agenciesData.agencies);
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -43,7 +75,7 @@ export const AdminDashboard: React.FC = () => {
         <StatCard
           title="Total Bookings"
           titleBn="মোট বুকিং"
-          value={stats.totalBookings}
+          value={stats.totalBookings || 0}
           color="secondary"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -55,7 +87,7 @@ export const AdminDashboard: React.FC = () => {
         <StatCard
           title="Total Revenue"
           titleBn="মোট আয়"
-          value={formatCurrency(stats.totalRevenue)}
+          value={formatCurrency(stats.totalRevenue || 0)}
           color="success"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -84,7 +116,10 @@ export const AdminDashboard: React.FC = () => {
             Registered Agencies
             <span className="font-bengali text-base font-normal text-sand-500 ml-2">(নিবন্ধিত এজেন্সি)</span>
           </h2>
-          <button className="btn-primary text-sm py-2">
+          <button
+            onClick={() => navigate('/admin/agencies')}
+            className="btn-primary text-sm py-2"
+          >
             + Add Agency
           </button>
         </div>
@@ -95,13 +130,13 @@ export const AdminDashboard: React.FC = () => {
               <tr className="border-b border-sand-100">
                 <th className="text-left py-3 px-4 text-sand-500 font-medium">Agency Name</th>
                 <th className="text-left py-3 px-4 text-sand-500 font-medium">Plan</th>
-                <th className="text-left py-3 px-4 text-sand-500 font-medium">Agents</th>
+                <th className="text-left py-3 px-4 text-sand-500 font-medium">Max Agents</th>
                 <th className="text-left py-3 px-4 text-sand-500 font-medium">Status</th>
                 <th className="text-left py-3 px-4 text-sand-500 font-medium">Contact</th>
               </tr>
             </thead>
             <tbody>
-              {DEMO_AGENCIES.map((agency) => (
+              {agencies.map((agency) => (
                 <tr key={agency.id} className="border-b border-sand-50 hover:bg-sand-50 transition-colors">
                   <td className="py-4 px-4">
                     <div>
@@ -111,15 +146,15 @@ export const AdminDashboard: React.FC = () => {
                   </td>
                   <td className="py-4 px-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      agency.subscription.plan === 'enterprise' ? 'bg-purple-100 text-purple-700' :
-                      agency.subscription.plan === 'pro' ? 'bg-secondary-100 text-secondary-700' :
+                      agency.subscription?.plan === 'enterprise' ? 'bg-purple-100 text-purple-700' :
+                      agency.subscription?.plan === 'pro' ? 'bg-secondary-100 text-secondary-700' :
                       'bg-sand-100 text-sand-700'
                     }`}>
-                      {agency.subscription.plan.charAt(0).toUpperCase() + agency.subscription.plan.slice(1)}
+                      {agency.subscription?.plan?.charAt(0).toUpperCase() + agency.subscription?.plan?.slice(1)}
                     </span>
                   </td>
                   <td className="py-4 px-4 text-sand-600">
-                    {Math.floor(Math.random() * 8) + 2} / {agency.subscription.maxAgents}
+                    {agency.subscription?.maxAgents || 0}
                   </td>
                   <td className="py-4 px-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -140,7 +175,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card hover className="cursor-pointer group">
+        <Card hover className="cursor-pointer group" onClick={() => navigate('/admin/agencies')}>
           <div className="flex items-center gap-4">
             <div className="p-4 bg-primary-50 rounded-xl text-primary-600 group-hover:bg-primary-100 transition-colors">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -154,7 +189,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </Card>
 
-        <Card hover className="cursor-pointer group">
+        <Card hover className="cursor-pointer group" onClick={() => navigate('/admin/reports')}>
           <div className="flex items-center gap-4">
             <div className="p-4 bg-secondary-50 rounded-xl text-secondary-600 group-hover:bg-secondary-100 transition-colors">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -168,7 +203,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </Card>
 
-        <Card hover className="cursor-pointer group">
+        <Card hover className="cursor-pointer group" onClick={() => navigate('/admin/users')}>
           <div className="flex items-center gap-4">
             <div className="p-4 bg-accent-50 rounded-xl text-accent-600 group-hover:bg-accent-100 transition-colors">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -177,8 +212,8 @@ export const AdminDashboard: React.FC = () => {
               </svg>
             </div>
             <div>
-              <h3 className="font-semibold text-sand-800">Platform Settings</h3>
-              <p className="text-sm text-sand-500">Configure system preferences</p>
+              <h3 className="font-semibold text-sand-800">Manage Users</h3>
+              <p className="text-sm text-sand-500">View and manage all users</p>
             </div>
           </div>
         </Card>
