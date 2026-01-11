@@ -466,51 +466,53 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
 async function handleUpdatePackage(packageId: string, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as any;
 
-  await env.DB.prepare(`
-    UPDATE packages SET
-      title = COALESCE(?, title),
-      title_bn = COALESCE(?, title_bn),
-      destination = COALESCE(?, destination),
-      destination_bn = COALESCE(?, destination_bn),
-      description = COALESCE(?, description),
-      description_bn = COALESCE(?, description_bn),
-      departure_date = COALESCE(?, departure_date),
-      return_date = COALESCE(?, return_date),
-      departure_time = COALESCE(?, departure_time),
-      vehicle_type = COALESCE(?, vehicle_type),
-      total_seats = COALESCE(?, total_seats),
-      available_seats = COALESCE(?, available_seats),
-      price_per_person = COALESCE(?, price_per_person),
-      couple_price = COALESCE(?, couple_price),
-      child_price = COALESCE(?, child_price),
-      advance_amount = COALESCE(?, advance_amount),
-      bus_configuration = COALESCE(?, bus_configuration),
-      seat_layout = COALESCE(?, seat_layout),
-      status = COALESCE(?, status),
-      updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(
-    body.title || null,
-    body.titleBn || null,
-    body.destination || null,
-    body.destinationBn || null,
-    body.description || null,
-    body.descriptionBn || null,
-    body.departureDate || null,
-    body.returnDate || null,
-    body.departureTime || null,
-    body.vehicleType || null,
-    body.totalSeats || null,
-    body.availableSeats || null,
-    body.pricePerPerson || null,
-    body.couplePrice || null,
-    body.childPrice || null,
-    body.advanceAmount || null,
-    body.busConfiguration ? JSON.stringify(body.busConfiguration) : null,
-    body.seatLayout ? JSON.stringify(body.seatLayout) : null,
-    body.status || null,
-    packageId
-  ).run();
+  // Build dynamic update query for all fields
+  const updates: string[] = [];
+  const params: any[] = [];
+
+  if (body.title !== undefined) { updates.push('title = ?'); params.push(body.title); }
+  if (body.titleBn !== undefined) { updates.push('title_bn = ?'); params.push(body.titleBn); }
+  if (body.destination !== undefined) { updates.push('destination = ?'); params.push(body.destination); }
+  if (body.destinationBn !== undefined) { updates.push('destination_bn = ?'); params.push(body.destinationBn); }
+  if (body.description !== undefined) { updates.push('description = ?'); params.push(body.description); }
+  if (body.descriptionBn !== undefined) { updates.push('description_bn = ?'); params.push(body.descriptionBn); }
+  if (body.departureDate !== undefined) { updates.push('departure_date = ?'); params.push(body.departureDate); }
+  if (body.returnDate !== undefined) { updates.push('return_date = ?'); params.push(body.returnDate); }
+  if (body.departureTime !== undefined) { updates.push('departure_time = ?'); params.push(body.departureTime); }
+  if (body.vehicleType !== undefined) { updates.push('vehicle_type = ?'); params.push(body.vehicleType); }
+  if (body.totalSeats !== undefined) { updates.push('total_seats = ?'); params.push(body.totalSeats); }
+  if (body.availableSeats !== undefined) { updates.push('available_seats = ?'); params.push(body.availableSeats); }
+  if (body.pricePerPerson !== undefined) { updates.push('price_per_person = ?'); params.push(body.pricePerPerson); }
+  if (body.couplePrice !== undefined) { updates.push('couple_price = ?'); params.push(body.couplePrice); }
+  if (body.childPrice !== undefined) { updates.push('child_price = ?'); params.push(body.childPrice); }
+  if (body.advanceAmount !== undefined) { updates.push('advance_amount = ?'); params.push(body.advanceAmount); }
+  if (body.boardingPoints !== undefined) { updates.push('boarding_points = ?'); params.push(JSON.stringify(body.boardingPoints)); }
+  if (body.droppingPoints !== undefined) { updates.push('dropping_points = ?'); params.push(JSON.stringify(body.droppingPoints)); }
+  if (body.inclusions !== undefined) { updates.push('inclusions = ?'); params.push(JSON.stringify(body.inclusions)); }
+  if (body.exclusions !== undefined) { updates.push('exclusions = ?'); params.push(JSON.stringify(body.exclusions)); }
+  if (body.mealPlan !== undefined) { updates.push('meal_plan = ?'); params.push(JSON.stringify(body.mealPlan)); }
+  if (body.status !== undefined) { updates.push('status = ?'); params.push(body.status); }
+
+  // Handle busConfiguration - can be set to null explicitly
+  if (body.busConfiguration !== undefined) {
+    updates.push('bus_configuration = ?');
+    params.push(body.busConfiguration ? JSON.stringify(body.busConfiguration) : null);
+  }
+
+  // Handle seatLayout - can be set to null explicitly
+  if (body.seatLayout !== undefined) {
+    updates.push('seat_layout = ?');
+    params.push(body.seatLayout ? JSON.stringify(body.seatLayout) : null);
+  }
+
+  if (updates.length === 0) {
+    return jsonResponse({ error: 'No fields to update' }, 400);
+  }
+
+  updates.push('updated_at = datetime("now")');
+  params.push(packageId);
+
+  await env.DB.prepare(`UPDATE packages SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
 
   return jsonResponse({ message: 'Package updated' });
 }
