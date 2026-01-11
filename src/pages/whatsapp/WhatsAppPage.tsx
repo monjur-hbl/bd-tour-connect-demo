@@ -179,6 +179,8 @@ export const WhatsAppPage: React.FC = () => {
         return <CheckCircle className="w-3 h-3 text-green-500" />;
       case 'connecting':
         return <Loader2 className="w-3 h-3 text-yellow-500 animate-spin" />;
+      case 'qr_ready':
+        return <RefreshCw className="w-3 h-3 text-blue-500" />;
       default:
         return <AlertCircle className="w-3 h-3 text-gray-400" />;
     }
@@ -221,6 +223,12 @@ export const WhatsAppPage: React.FC = () => {
                     Disconnect
                   </button>
                 </div>
+              ) : serverStatuses[1]?.status === 'connecting' ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-12 h-12 text-green-500 animate-spin mx-auto mb-4" />
+                  <p className="text-green-600 font-medium">Connecting...</p>
+                  <p className="text-sm text-gray-500 mt-2">Authenticating with WhatsApp</p>
+                </div>
               ) : serverQRCodes[1] ? (
                 <div className="text-center">
                   <p className="text-sm text-gray-600 mb-4">Scan with WhatsApp</p>
@@ -259,6 +267,12 @@ export const WhatsAppPage: React.FC = () => {
                   >
                     Disconnect
                   </button>
+                </div>
+              ) : serverStatuses[2]?.status === 'connecting' ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-12 h-12 text-green-500 animate-spin mx-auto mb-4" />
+                  <p className="text-green-600 font-medium">Connecting...</p>
+                  <p className="text-sm text-gray-500 mt-2">Authenticating with WhatsApp</p>
                 </div>
               ) : serverQRCodes[2] ? (
                 <div className="text-center">
@@ -331,7 +345,9 @@ export const WhatsAppPage: React.FC = () => {
                   status?.status === 'connected'
                     ? 'bg-green-400'
                     : status?.status === 'connecting'
-                    ? 'bg-yellow-400'
+                    ? 'bg-yellow-400 animate-pulse'
+                    : status?.status === 'qr_ready'
+                    ? 'bg-blue-400'
                     : 'bg-gray-300'
                 }`}
               />

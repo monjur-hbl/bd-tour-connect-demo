@@ -116,8 +116,17 @@ class WhatsAppSocketService {
     socket.on('whatsapp:qr', ({ qrCode }) => {
       console.log(`QR code received from Server ${serverId}`);
       server.qrCode = qrCode;
-      server.status = 'connecting';
+      server.status = 'qr_ready' as WhatsAppConnectionStatus;
       useWhatsAppStore.getState().setActiveServerQR(serverId, qrCode);
+      this.updateStore();
+    });
+
+    // Connecting (after QR scan)
+    socket.on('whatsapp:connecting', () => {
+      console.log(`Server ${serverId} connecting (QR scanned)...`);
+      server.status = 'connecting';
+      server.qrCode = null;
+      useWhatsAppStore.getState().setActiveServerQR(serverId, null);
       this.updateStore();
     });
 

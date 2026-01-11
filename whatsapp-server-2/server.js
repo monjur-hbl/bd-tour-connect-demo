@@ -195,6 +195,16 @@ async function createSession(agencyId) {
         }
       }
 
+      // Connecting state (after QR scan)
+      if (connection === 'connecting' && session?.status === 'qr_ready') {
+        console.log('QR scanned, authenticating...');
+        session.status = 'connecting';
+        session.qrCode = null;
+        io.to(agencyId).emit('whatsapp:connecting', {
+          serverId: SERVER_ID
+        });
+      }
+
       // Connected
       if (connection === 'open') {
         console.log('Connected!');
