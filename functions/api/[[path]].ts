@@ -91,6 +91,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return handleUpdatePackage(packageId, request, env);
     }
 
+    // Seat Management Routes
+    if (path.match(/^\/packages\/[\w-]+\/seats$/) && method === 'GET') {
+      const packageId = path.split('/')[2];
+      return handleGetSeats(packageId, env);
+    }
+
+    if (path.match(/^\/packages\/[\w-]+\/seats$/) && method === 'PUT') {
+      const packageId = path.split('/')[2];
+      return handleUpdateSeats(packageId, request, env);
+    }
+
+    if (path.match(/^\/packages\/[\w-]+\/seats\/block$/) && method === 'POST') {
+      const packageId = path.split('/')[2];
+      return handleBlockSeats(packageId, request, env);
+    }
+
+    if (path.match(/^\/packages\/[\w-]+\/seats\/block$/) && method === 'DELETE') {
+      const packageId = path.split('/')[2];
+      return handleUnblockSeats(packageId, request, env);
+    }
+
+    if (path.match(/^\/packages\/[\w-]+\/seats\/availability$/) && method === 'GET') {
+      const packageId = path.split('/')[2];
+      return handleGetSeatAvailability(packageId, env);
+    }
+
     // Booking Routes
     if (path === '/bookings' && method === 'GET') {
       return handleGetBookings(request, env);
@@ -917,6 +943,169 @@ async function handleUpdateAgency(agencyId: string, request: Request, env: Env):
       loginWelcomeTextBn: agency!.login_welcome_text_bn,
     }
   });
+}
+
+// ============================================
+// SEAT MANAGEMENT HANDLERS
+// ============================================
+
+async function handleGetSeats(packageId: string, env: Env): Promise<Response> {
+  const pkg = await env.DB.prepare('SELECT seat_layout FROM packages WHERE id = ?').bind(packageId).first();
+
+  if (!pkg) {
+    return jsonResponse({ error: 'Package not found' }, 404);
+  }
+
+  const seatLayout = pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null;
+
+  return jsonResponse({ seats: seatLayout?.seats || [] });
+}
+
+async function handleUpdateSeats(packageId: string, request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as { seats: any[] };
+
+  // Get current seat layout
+  const pkg = await env.DB.prepare('SELECT seat_layout FROM packages WHERE id = ?').bind(packageId).first();
+
+  if (!pkg) {
+    return jsonResponse({ error: 'Package not found' }, 404);
+  }
+
+  const currentLayout = pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : { rows: 0, columns: 0, seats: [] };
+
+  // Update seats in layout
+  currentLayout.seats = body.seats;
+
+  await env.DB.prepare('UPDATE packages SET seat_layout = ?, updated_at = datetime("now") WHERE id = ?')
+    .bind(JSON.stringify(currentLayout), packageId).run();
+
+  return jsonResponse({ message: 'Seats updated', seats: currentLayout.seats });
+}
+
+async function handleBlockSeats(packageId: string, request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as { seatIds: string[]; reason?: string };
+  const { seatIds, reason } = body;
+
+  if (!seatIds || !Array.isArray(seatIds) || seatIds.length === 0) {
+    return jsonResponse({ error: 'seatIds array is required' }, 400);
+  }
+
+  // Get current package with seat layout
+  const pkg = await env.DB.prepare('SELECT seat_layout, available_seats FROM packages WHERE id = ?').bind(packageId).first();
+
+  if (!pkg) {
+    return jsonResponse({ error: 'Package not found' }, 404);
+  }
+
+  const seatLayout = pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null;
+
+  if (!seatLayout || !seatLayout.seats) {
+    return jsonResponse({ error: 'Package has no seat layout' }, 400);
+  }
+
+  const blockedSeats: string[] = [];
+  let seatsToBlock = 0;
+
+  // Update seat statuses to blocked
+  seatLayout.seats = seatLayout.seats.map((seat: any) => {
+    if (seatIds.includes(seat.id) && seat.status === 'available') {
+      blockedSeats.push(seat.id);
+      seatsToBlock++;
+      return {
+        ...seat,
+        status: 'blocked',
+        blockedReason: reason || 'Agency Hold',
+        blockedAt: new Date().toISOString(),
+      };
+    }
+    return seat;
+  });
+
+  // Update package with new seat layout and decrement available seats
+  const newAvailableSeats = Math.max(0, (pkg.available_seats as number) - seatsToBlock);
+
+  await env.DB.prepare('UPDATE packages SET seat_layout = ?, available_seats = ?, updated_at = datetime("now") WHERE id = ?')
+    .bind(JSON.stringify(seatLayout), newAvailableSeats, packageId).run();
+
+  return jsonResponse({
+    message: `${blockedSeats.length} seat(s) blocked successfully`,
+    blockedSeats,
+    availableSeats: newAvailableSeats,
+  });
+}
+
+async function handleUnblockSeats(packageId: string, request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as { seatIds: string[] };
+  const { seatIds } = body;
+
+  if (!seatIds || !Array.isArray(seatIds) || seatIds.length === 0) {
+    return jsonResponse({ error: 'seatIds array is required' }, 400);
+  }
+
+  // Get current package with seat layout
+  const pkg = await env.DB.prepare('SELECT seat_layout, available_seats FROM packages WHERE id = ?').bind(packageId).first();
+
+  if (!pkg) {
+    return jsonResponse({ error: 'Package not found' }, 404);
+  }
+
+  const seatLayout = pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null;
+
+  if (!seatLayout || !seatLayout.seats) {
+    return jsonResponse({ error: 'Package has no seat layout' }, 400);
+  }
+
+  const unblockedSeats: string[] = [];
+  let seatsToUnblock = 0;
+
+  // Update seat statuses back to available
+  seatLayout.seats = seatLayout.seats.map((seat: any) => {
+    if (seatIds.includes(seat.id) && seat.status === 'blocked') {
+      unblockedSeats.push(seat.id);
+      seatsToUnblock++;
+      return {
+        ...seat,
+        status: 'available',
+        blockedReason: undefined,
+        blockedAt: undefined,
+      };
+    }
+    return seat;
+  });
+
+  // Update package with new seat layout and increment available seats
+  const newAvailableSeats = (pkg.available_seats as number) + seatsToUnblock;
+
+  await env.DB.prepare('UPDATE packages SET seat_layout = ?, available_seats = ?, updated_at = datetime("now") WHERE id = ?')
+    .bind(JSON.stringify(seatLayout), newAvailableSeats, packageId).run();
+
+  return jsonResponse({
+    message: `${unblockedSeats.length} seat(s) unblocked successfully`,
+    unblockedSeats,
+    availableSeats: newAvailableSeats,
+  });
+}
+
+async function handleGetSeatAvailability(packageId: string, env: Env): Promise<Response> {
+  const pkg = await env.DB.prepare('SELECT seat_layout, total_seats, available_seats FROM packages WHERE id = ?').bind(packageId).first();
+
+  if (!pkg) {
+    return jsonResponse({ error: 'Package not found' }, 404);
+  }
+
+  const seatLayout = pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null;
+  const seats = seatLayout?.seats || [];
+
+  const availability = {
+    totalSeats: pkg.total_seats,
+    availableSeats: pkg.available_seats,
+    available: seats.filter((s: any) => s.status === 'available').length,
+    booked: seats.filter((s: any) => s.status === 'booked').length,
+    blocked: seats.filter((s: any) => s.status === 'blocked').length,
+    sold: seats.filter((s: any) => s.status === 'sold').length,
+  };
+
+  return jsonResponse({ availability });
 }
 
 // ============================================
