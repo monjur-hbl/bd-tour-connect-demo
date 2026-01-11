@@ -5,6 +5,8 @@ import { Card } from '../common/Card';
 import { packagesAPI, bookingsAPI } from '../../services/api';
 import { BusSeatLayoutPicker } from '../seats';
 import { SeatLayout, BusConfiguration, PassengerGender } from '../../types';
+import { HoldSeatsModal } from './HoldSeatsModal';
+import { ShoppingCart, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Types
@@ -108,6 +110,9 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     source: 'walk-in',
     notes: '',
   });
+
+  // Hold modal state
+  const [holdModalPackage, setHoldModalPackage] = useState<Package | null>(null);
 
   // Fetch packages on mount
   useEffect(() => {
@@ -554,8 +559,7 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
               .map((pkg) => (
                 <Card
                   key={pkg.id}
-                  className="cursor-pointer transition-all hover:shadow-lg hover:border-primary-300"
-                  onClick={() => addPackageBooking(pkg)}
+                  className="transition-all hover:shadow-lg hover:border-primary-300"
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between">
@@ -596,6 +600,29 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
                           {pkg.childPrice && <p>Child: {formatCurrency(pkg.childPrice)}</p>}
                         </div>
                       </div>
+                    </div>
+                    {/* Book and Hold buttons */}
+                    <div className="pt-3 border-t border-sand-100 flex gap-2">
+                      <button
+                        onClick={() => addPackageBooking(pkg)}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-500 text-white rounded-lg font-medium hover:bg-primary-600 transition-colors"
+                      >
+                        <ShoppingCart className="w-4 h-4" />
+                        Book
+                      </button>
+                      {pkg.seatLayout && userRole === 'agency_admin' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHoldModalPackage(pkg);
+                          }}
+                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors"
+                          title="Hold seats without booking"
+                        >
+                          <Lock className="w-4 h-4" />
+                          Hold
+                        </button>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -1168,6 +1195,19 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
             </button>
           </div>
         </div>
+      )}
+
+      {/* Hold Seats Modal */}
+      {holdModalPackage && (
+        <HoldSeatsModal
+          isOpen={!!holdModalPackage}
+          onClose={() => setHoldModalPackage(null)}
+          package={holdModalPackage}
+          onSuccess={() => {
+            // Refresh packages to update seat availability
+            fetchPackages();
+          }}
+        />
       )}
     </div>
   );
