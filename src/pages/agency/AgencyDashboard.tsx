@@ -197,7 +197,7 @@ export const AgencyDashboard: React.FC = () => {
           <span className="font-semibold">+ New Package</span>
         </button>
         <button
-          onClick={() => navigate('/agency/bookings')}
+          onClick={() => navigate('/agency/new-booking')}
           className="p-4 bg-secondary-500 text-white rounded-xl flex items-center gap-3 hover:bg-secondary-600 transition-colors"
         >
           <span className="font-semibold">+ New Booking</span>

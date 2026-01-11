@@ -17,6 +17,7 @@ import { AgencySettings } from './pages/agency/AgencySettings';
 import { AgentManagement } from './pages/agency/AgentManagement';
 import { PackageManagement } from './pages/agency/PackageManagement';
 import { BookingsManagement } from './pages/agency/BookingsManagement';
+import { AgencyNewBooking } from './pages/agency/NewBooking';
 import { AgentDashboard } from './pages/agent/AgentDashboard';
 import { AvailablePackages } from './pages/agent/AvailablePackages';
 import { MyBookings } from './pages/agent/MyBookings';
@@ -91,6 +92,7 @@ const App: React.FC = () => {
           <Route index element={<AgencyDashboard />} />
           <Route path="packages" element={<PackageManagement />} />
           <Route path="bookings" element={<BookingsManagement />} />
+          <Route path="new-booking" element={<AgencyNewBooking />} />
           <Route path="agents" element={<AgentManagement />} />
           <Route path="settings" element={<AgencySettings />} />
           <Route path="profile" element={<ProfileSettings />} />
