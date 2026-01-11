@@ -11,9 +11,9 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 
-// CORS configuration
+// CORS configuration - allow all origins for now (can be restricted later)
 const corsOptions = {
-  origin: ['http://localhost:3000', 'https://bd-tour-connect.pages.dev', /\.bd-tour-connect\.pages\.dev$/],
+  origin: true, // Allow all origins
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 };

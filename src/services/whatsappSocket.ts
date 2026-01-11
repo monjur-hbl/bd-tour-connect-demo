@@ -7,8 +7,8 @@ import {
   WhatsAppConnectionStatus,
 } from '../types';
 
-// WhatsApp server URL - change this based on environment
-const WHATSAPP_SERVER_URL = process.env.REACT_APP_WHATSAPP_SERVER_URL || 'http://localhost:3001';
+// WhatsApp server URL - Google Cloud Run deployment
+const WHATSAPP_SERVER_URL = process.env.REACT_APP_WHATSAPP_SERVER_URL || 'https://bd-tour-whatsapp-1006186358018.us-central1.run.app';
 
 class WhatsAppSocketService {
   private socket: Socket | null = null;
