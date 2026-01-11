@@ -396,6 +396,8 @@ async function handleGetPackages(request: Request, env: Env): Promise<Response> 
     inclusions: p.inclusions ? JSON.parse(p.inclusions) : [],
     exclusions: p.exclusions ? JSON.parse(p.exclusions) : [],
     mealPlan: p.meal_plan ? JSON.parse(p.meal_plan) : [],
+    busConfiguration: p.bus_configuration ? JSON.parse(p.bus_configuration) : null,
+    seatLayout: p.seat_layout ? JSON.parse(p.seat_layout) : null,
     status: p.status,
     createdAt: p.created_at,
   }));
@@ -435,6 +437,8 @@ async function handleGetPackage(packageId: string, env: Env): Promise<Response> 
       inclusions: pkg.inclusions ? JSON.parse(pkg.inclusions as string) : [],
       exclusions: pkg.exclusions ? JSON.parse(pkg.exclusions as string) : [],
       mealPlan: pkg.meal_plan ? JSON.parse(pkg.meal_plan as string) : [],
+      busConfiguration: pkg.bus_configuration ? JSON.parse(pkg.bus_configuration as string) : null,
+      seatLayout: pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null,
       status: pkg.status,
       createdAt: pkg.created_at,
     },
@@ -446,8 +450,8 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
   const id = `pkg-${Date.now()}`;
 
   await env.DB.prepare(`
-    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, inclusions, exclusions, meal_plan, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, inclusions, exclusions, meal_plan, bus_configuration, seat_layout, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, body.agencyId, body.title, body.titleBn || null, body.destination, body.destinationBn || null,
     body.description || null, body.descriptionBn || null, body.departureDate, body.returnDate,
@@ -455,7 +459,10 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
     body.pricePerPerson, body.couplePrice || null, body.childPrice || null, body.advanceAmount || 0,
     JSON.stringify(body.boardingPoints || []), JSON.stringify(body.droppingPoints || []),
     JSON.stringify(body.inclusions || []), JSON.stringify(body.exclusions || []),
-    JSON.stringify(body.mealPlan || []), body.status || 'draft'
+    JSON.stringify(body.mealPlan || []),
+    body.busConfiguration ? JSON.stringify(body.busConfiguration) : null,
+    body.seatLayout ? JSON.stringify(body.seatLayout) : null,
+    body.status || 'draft'
   ).run();
 
   return jsonResponse({ id, message: 'Package created' }, 201);
@@ -464,12 +471,53 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
 async function handleUpdatePackage(packageId: string, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as any;
 
-  await env.DB.prepare(`
-    UPDATE packages SET
-      title = COALESCE(?, title), status = COALESCE(?, status), available_seats = COALESCE(?, available_seats),
-      updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(body.title || null, body.status || null, body.availableSeats || null, packageId).run();
+  // Build dynamic update query for all fields
+  const updates: string[] = [];
+  const params: any[] = [];
+
+  if (body.title !== undefined) { updates.push('title = ?'); params.push(body.title); }
+  if (body.titleBn !== undefined) { updates.push('title_bn = ?'); params.push(body.titleBn); }
+  if (body.destination !== undefined) { updates.push('destination = ?'); params.push(body.destination); }
+  if (body.destinationBn !== undefined) { updates.push('destination_bn = ?'); params.push(body.destinationBn); }
+  if (body.description !== undefined) { updates.push('description = ?'); params.push(body.description); }
+  if (body.descriptionBn !== undefined) { updates.push('description_bn = ?'); params.push(body.descriptionBn); }
+  if (body.departureDate !== undefined) { updates.push('departure_date = ?'); params.push(body.departureDate); }
+  if (body.returnDate !== undefined) { updates.push('return_date = ?'); params.push(body.returnDate); }
+  if (body.departureTime !== undefined) { updates.push('departure_time = ?'); params.push(body.departureTime); }
+  if (body.vehicleType !== undefined) { updates.push('vehicle_type = ?'); params.push(body.vehicleType); }
+  if (body.totalSeats !== undefined) { updates.push('total_seats = ?'); params.push(body.totalSeats); }
+  if (body.availableSeats !== undefined) { updates.push('available_seats = ?'); params.push(body.availableSeats); }
+  if (body.pricePerPerson !== undefined) { updates.push('price_per_person = ?'); params.push(body.pricePerPerson); }
+  if (body.couplePrice !== undefined) { updates.push('couple_price = ?'); params.push(body.couplePrice); }
+  if (body.childPrice !== undefined) { updates.push('child_price = ?'); params.push(body.childPrice); }
+  if (body.advanceAmount !== undefined) { updates.push('advance_amount = ?'); params.push(body.advanceAmount); }
+  if (body.boardingPoints !== undefined) { updates.push('boarding_points = ?'); params.push(JSON.stringify(body.boardingPoints)); }
+  if (body.droppingPoints !== undefined) { updates.push('dropping_points = ?'); params.push(JSON.stringify(body.droppingPoints)); }
+  if (body.inclusions !== undefined) { updates.push('inclusions = ?'); params.push(JSON.stringify(body.inclusions)); }
+  if (body.exclusions !== undefined) { updates.push('exclusions = ?'); params.push(JSON.stringify(body.exclusions)); }
+  if (body.mealPlan !== undefined) { updates.push('meal_plan = ?'); params.push(JSON.stringify(body.mealPlan)); }
+  if (body.status !== undefined) { updates.push('status = ?'); params.push(body.status); }
+
+  // Handle busConfiguration - can be set to null explicitly
+  if (body.busConfiguration !== undefined) {
+    updates.push('bus_configuration = ?');
+    params.push(body.busConfiguration ? JSON.stringify(body.busConfiguration) : null);
+  }
+
+  // Handle seatLayout - can be set to null explicitly
+  if (body.seatLayout !== undefined) {
+    updates.push('seat_layout = ?');
+    params.push(body.seatLayout ? JSON.stringify(body.seatLayout) : null);
+  }
+
+  if (updates.length === 0) {
+    return jsonResponse({ error: 'No fields to update' }, 400);
+  }
+
+  updates.push('updated_at = datetime("now")');
+  params.push(packageId);
+
+  await env.DB.prepare(`UPDATE packages SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
 
   return jsonResponse({ message: 'Package updated' });
 }
