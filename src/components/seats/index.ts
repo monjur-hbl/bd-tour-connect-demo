@@ -7,3 +7,4 @@ export { DeckTabs, CompactDeckTabs } from './DeckTabs';
 export { SteeringIcon, CompactSteeringIcon } from './SteeringIcon';
 export { BusSeatLayoutBuilder } from './BusSeatLayoutBuilder';
 export { BusSeatLayoutPicker, CompactSeatPicker } from './BusSeatLayoutPicker';
+export { SeatAvailabilityViewer } from './SeatAvailabilityViewer';

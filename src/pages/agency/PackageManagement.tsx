@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../../components/common/Card';
+import { PackageDetailsModal } from '../../components/package';
 import { packagesAPI } from '../../services/api';
 import { BusSeatLayoutBuilder } from '../../components/seats';
-import { BusConfiguration } from '../../types';
+import { BusConfiguration, SeatLayout } from '../../types';
 import { getDefaultBusConfig, createSeatLayout } from '../../utils/seatUtils';
 import toast from 'react-hot-toast';
 
@@ -32,6 +34,7 @@ interface Package {
   status: string;
   createdAt: string;
   busConfiguration?: BusConfiguration;
+  seatLayout?: SeatLayout;
 }
 
 const VEHICLE_TYPES = [
@@ -53,11 +56,14 @@ const STATUS_OPTIONS = [
 ];
 
 export const PackageManagement: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [packageToDelete, setPackageToDelete] = useState<Package | null>(null);
   const [editingPackage, setEditingPackage] = useState<Package | null>(null);
   const [saving, setSaving] = useState(false);
@@ -221,6 +227,16 @@ export const PackageManagement: React.FC = () => {
     }
   };
 
+  const handleViewDetails = (pkg: Package) => {
+    setSelectedPackage(pkg);
+    setShowDetailsModal(true);
+  };
+
+  const handleCreateBooking = (pkg: Package) => {
+    // Navigate to new booking page with package ID
+    navigate('/agency/new-booking', { state: { packageId: pkg.id, package: pkg } });
+  };
+
   const handleDeleteClick = (pkg: Package) => {
     setPackageToDelete(pkg);
     setShowDeleteConfirm(true);
@@ -364,14 +380,27 @@ export const PackageManagement: React.FC = () => {
                   </div>
                   <div className="flex gap-2">
                     <button
+                      onClick={() => handleViewDetails(pkg)}
+                      className="px-3 py-2 text-sand-600 hover:bg-sand-100 rounded-lg transition-colors font-medium text-sm"
+                    >
+                      Details
+                    </button>
+                    <button
+                      onClick={() => handleCreateBooking(pkg)}
+                      disabled={pkg.availableSeats === 0}
+                      className="px-3 py-2 bg-secondary-500 text-white rounded-lg hover:bg-secondary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-sm"
+                    >
+                      Book
+                    </button>
+                    <button
                       onClick={() => handleOpenModal(pkg)}
-                      className="px-4 py-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors font-medium"
+                      className="px-3 py-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors font-medium text-sm"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDeleteClick(pkg)}
-                      className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
+                      className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium text-sm"
                     >
                       Delete
                     </button>
@@ -714,6 +743,22 @@ export const PackageManagement: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Package Details Modal with Tabs */}
+      {showDetailsModal && selectedPackage && (
+        <PackageDetailsModal
+          package={selectedPackage}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedPackage(null);
+          }}
+          onBook={() => {
+            setShowDetailsModal(false);
+            handleCreateBooking(selectedPackage);
+          }}
+          showBilingual={true}
+        />
       )}
 
       {/* Delete Confirmation Modal */}

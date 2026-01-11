@@ -317,6 +317,13 @@ export function countBlockedSeats(seats: Seat[]): number {
 }
 
 /**
+ * Count seats by specific status
+ */
+export function countSeatsByStatus(seats: Seat[], status: Seat['status']): number {
+  return seats.filter((seat) => seat.status === status).length;
+}
+
+/**
  * Get seat by ID
  */
 export function getSeatById(seats: Seat[], seatId: string): Seat | undefined {

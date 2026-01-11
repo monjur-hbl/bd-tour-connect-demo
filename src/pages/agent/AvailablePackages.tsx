@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../../components/common/Card';
+import { PackageDetailsModal } from '../../components/package';
 import { packagesAPI } from '../../services/api';
+import { BusConfiguration, SeatLayout } from '../../types';
 import toast from 'react-hot-toast';
 
 interface Package {
@@ -29,6 +31,8 @@ interface Package {
   exclusions: string[];
   status: string;
   createdAt: string;
+  busConfiguration?: BusConfiguration;
+  seatLayout?: SeatLayout;
 }
 
 export const AvailablePackages: React.FC = () => {
@@ -236,158 +240,17 @@ export const AvailablePackages: React.FC = () => {
         )}
       </div>
 
-      {/* Detail Modal */}
+      {/* Detail Modal with Tabs */}
       {showDetailModal && selectedPackage && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="bg-gradient-to-r from-primary-500 to-primary-600 p-6 rounded-t-2xl">
-              <div className="flex items-start justify-between">
-                <div className="text-white">
-                  <h2 className="text-2xl font-bold">{selectedPackage.destination}</h2>
-                  {selectedPackage.destinationBn && <p className="text-primary-100 font-bengali">{selectedPackage.destinationBn}</p>}
-                  <p className="mt-2 text-primary-100">{selectedPackage.title}</p>
-                </div>
-                <button
-                  onClick={() => setShowDetailModal(false)}
-                  className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white"
-                >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-6">
-              {/* Schedule */}
-              <div>
-                <h3 className="font-semibold text-sand-700 mb-3">Schedule</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-sand-500">Departure</p>
-                    <p className="font-medium">{formatDate(selectedPackage.departureDate)} at {selectedPackage.departureTime || 'TBA'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sand-500">Return</p>
-                    <p className="font-medium">{formatDate(selectedPackage.returnDate)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sand-500">Duration</p>
-                    <p className="font-medium">{getDaysCount(selectedPackage.departureDate, selectedPackage.returnDate)} days</p>
-                  </div>
-                  <div>
-                    <p className="text-sand-500">Vehicle</p>
-                    <p className="font-medium">{selectedPackage.vehicleType || 'TBA'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Pricing */}
-              <div>
-                <h3 className="font-semibold text-sand-700 mb-3">Pricing</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-3 bg-primary-50 rounded-lg text-center">
-                    <p className="text-primary-600 text-sm">Per Person</p>
-                    <p className="font-bold text-primary-700">{formatCurrency(selectedPackage.pricePerPerson)}</p>
-                  </div>
-                  {selectedPackage.couplePrice > 0 && (
-                    <div className="p-3 bg-secondary-50 rounded-lg text-center">
-                      <p className="text-secondary-600 text-sm">Couple</p>
-                      <p className="font-bold text-secondary-700">{formatCurrency(selectedPackage.couplePrice)}</p>
-                    </div>
-                  )}
-                  {selectedPackage.childPrice > 0 && (
-                    <div className="p-3 bg-accent-50 rounded-lg text-center">
-                      <p className="text-accent-600 text-sm">Child</p>
-                      <p className="font-bold text-accent-700">{formatCurrency(selectedPackage.childPrice)}</p>
-                    </div>
-                  )}
-                  {selectedPackage.advanceAmount > 0 && (
-                    <div className="p-3 bg-sand-100 rounded-lg text-center">
-                      <p className="text-sand-600 text-sm">Advance</p>
-                      <p className="font-bold text-sand-700">{formatCurrency(selectedPackage.advanceAmount)}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Availability */}
-              <div>
-                <h3 className="font-semibold text-sand-700 mb-3">Availability</h3>
-                <div className="flex items-center gap-4">
-                  <div className="flex-1 h-4 bg-sand-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary-500 rounded-full"
-                      style={{ width: `${((selectedPackage.totalSeats - selectedPackage.availableSeats) / selectedPackage.totalSeats) * 100}%` }}
-                    ></div>
-                  </div>
-                  <span className="font-medium text-sand-700">
-                    {selectedPackage.availableSeats} / {selectedPackage.totalSeats} seats available
-                  </span>
-                </div>
-              </div>
-
-              {/* Inclusions */}
-              {selectedPackage.inclusions && selectedPackage.inclusions.length > 0 && (
-                <div>
-                  <h3 className="font-semibold text-sand-700 mb-3">Inclusions</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedPackage.inclusions.map((item, i) => (
-                      <span key={i} className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Exclusions */}
-              {selectedPackage.exclusions && selectedPackage.exclusions.length > 0 && (
-                <div>
-                  <h3 className="font-semibold text-sand-700 mb-3">Exclusions</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedPackage.exclusions.map((item, i) => (
-                      <span key={i} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Description */}
-              {selectedPackage.description && (
-                <div>
-                  <h3 className="font-semibold text-sand-700 mb-3">Description</h3>
-                  <p className="text-sand-600">{selectedPackage.description}</p>
-                  {selectedPackage.descriptionBn && (
-                    <p className="text-sand-500 font-bengali mt-2">{selectedPackage.descriptionBn}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Action */}
-              <div className="pt-4 border-t border-sand-100">
-                <button
-                  onClick={() => {
-                    setShowDetailModal(false);
-                    handleCreateBooking(selectedPackage);
-                  }}
-                  disabled={selectedPackage.availableSeats === 0}
-                  className="w-full py-3 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {selectedPackage.availableSeats > 0 ? 'Book This Package' : 'No Seats Available'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PackageDetailsModal
+          package={selectedPackage}
+          onClose={() => setShowDetailModal(false)}
+          onBook={() => {
+            setShowDetailModal(false);
+            handleCreateBooking(selectedPackage);
+          }}
+          showBilingual={true}
+        />
       )}
     </div>
   );
