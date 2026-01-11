@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { useWhatsAppStore } from '../../stores/whatsappStore';
 import { whatsappSocket } from '../../services/whatsappSocket';
@@ -6,6 +6,10 @@ import { ChatList, ChatWindow, QRScanner } from '../../components/whatsapp';
 import { WhatsAppMessageType } from '../../types';
 import { Settings, Bell, BellOff, WifiOff, RefreshCw, MessageSquare, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+// WhatsApp Server URLs for REST API polling
+const WHATSAPP_SERVER_1_URL = process.env.REACT_APP_WHATSAPP_SERVER_1_URL || 'https://bd-tour-whatsapp-1-1006186358018.us-central1.run.app';
+const WHATSAPP_SERVER_2_URL = process.env.REACT_APP_WHATSAPP_SERVER_2_URL || 'https://bd-tour-whatsapp-2-1006186358018.us-central1.run.app';
 
 export const WhatsAppPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -37,7 +41,69 @@ export const WhatsAppPage: React.FC = () => {
   } = useWhatsAppStore();
 
   const [showQRScanner, setShowQRScanner] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState<Record<number, boolean>>({});
+  const pollingRef = useRef<Record<number, NodeJS.Timeout | null>>({});
+
+  // Get server URL by ID
+  const getServerUrl = (serverId: number) => {
+    return serverId === 1 ? WHATSAPP_SERVER_1_URL : WHATSAPP_SERVER_2_URL;
+  };
+
+  // Poll server status via REST API (miami-style)
+  const pollServerStatus = useCallback(async (serverId: number) => {
+    if (!user?.agencyId) return;
+
+    try {
+      const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}`);
+      const data = await response.json();
+
+      // Update store with status from REST API
+      if (data.status === 'connected' && data.connectedAs) {
+        useWhatsAppStore.getState().setServerStatuses({
+          ...serverStatuses,
+          [serverId]: {
+            status: 'connected',
+            account: {
+              id: data.connectedAs.id,
+              phoneNumber: data.connectedAs.phoneNumber,
+              name: data.connectedAs.name,
+              status: 'connected',
+              agencyId: user.agencyId,
+              serverId: serverId,
+            },
+          },
+        });
+        // Stop polling once connected
+        if (pollingRef.current[serverId]) {
+          clearInterval(pollingRef.current[serverId]!);
+          pollingRef.current[serverId] = null;
+        }
+        toast.dismiss(`qr-loading-${serverId}`);
+        toast.success(`WhatsApp ${serverId} connected!`);
+        setIsConnecting((prev) => ({ ...prev, [serverId]: false }));
+      } else if (data.status === 'qr_ready' && data.qrCode) {
+        useWhatsAppStore.getState().setActiveServerQR(serverId, data.qrCode);
+        useWhatsAppStore.getState().setServerStatuses({
+          ...serverStatuses,
+          [serverId]: {
+            status: 'qr_ready',
+            account: null,
+          },
+        });
+        toast.dismiss(`qr-loading-${serverId}`);
+      } else if (data.status === 'connecting') {
+        useWhatsAppStore.getState().setServerStatuses({
+          ...serverStatuses,
+          [serverId]: {
+            status: 'connecting',
+            account: null,
+          },
+        });
+      }
+    } catch (err) {
+      console.error(`Error polling server ${serverId}:`, err);
+    }
+  }, [user?.agencyId, serverStatuses]);
 
   // Connect to WhatsApp servers on mount
   useEffect(() => {
@@ -52,7 +118,10 @@ export const WhatsAppPage: React.FC = () => {
     }
 
     return () => {
-      // Don't disconnect on unmount - keep connection alive
+      // Clear all polling intervals on unmount
+      Object.values(pollingRef.current).forEach((interval) => {
+        if (interval) clearInterval(interval);
+      });
     };
   }, [user?.agencyId]);
 
@@ -112,30 +181,99 @@ export const WhatsAppPage: React.FC = () => {
     }
   }, [activeChat, activeChatData, activeServer]);
 
-  const handleRequestQR = useCallback((serverId: number) => {
-    setIsConnecting(true);
+  const handleRequestQR = useCallback(async (serverId: number) => {
+    if (!user?.agencyId) return;
+
+    setIsConnecting((prev) => ({ ...prev, [serverId]: true }));
     toast.loading(`Initializing WhatsApp ${serverId}...`, { id: `qr-loading-${serverId}` });
 
-    whatsappSocket.requestQR(serverId);
+    try {
+      // Call REST API to initiate connection
+      const response = await fetch(`${getServerUrl(serverId)}/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agencyId: user.agencyId }),
+      });
 
-    setTimeout(() => {
+      if (!response.ok) {
+        throw new Error('Failed to connect');
+      }
+
+      // Start polling for status updates (every 2 seconds)
+      if (pollingRef.current[serverId]) {
+        clearInterval(pollingRef.current[serverId]!);
+      }
+
+      pollingRef.current[serverId] = setInterval(() => {
+        pollServerStatus(serverId);
+      }, 2000);
+
+      // Also poll immediately
+      pollServerStatus(serverId);
+
+      // Also trigger socket connection for message events
+      whatsappSocket.requestQR(serverId);
+
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        if (pollingRef.current[serverId]) {
+          clearInterval(pollingRef.current[serverId]!);
+          pollingRef.current[serverId] = null;
+        }
+        setIsConnecting((prev) => ({ ...prev, [serverId]: false }));
+        toast.dismiss(`qr-loading-${serverId}`);
+      }, 60000);
+    } catch (err) {
+      console.error(`Error connecting to server ${serverId}:`, err);
       toast.dismiss(`qr-loading-${serverId}`);
-      setIsConnecting(false);
-    }, 30000);
-  }, []);
+      toast.error(`Failed to connect to WhatsApp ${serverId}`);
+      setIsConnecting((prev) => ({ ...prev, [serverId]: false }));
+    }
+  }, [user?.agencyId, pollServerStatus]);
 
   const handleCancelQR = useCallback(() => {
     setQrCode(null);
     setShowQRScanner(false);
-    setIsConnecting(false);
+    setIsConnecting({});
+    // Clear all polling
+    Object.values(pollingRef.current).forEach((interval) => {
+      if (interval) clearInterval(interval);
+    });
+    pollingRef.current = {};
     toast.dismiss('qr-loading-1');
     toast.dismiss('qr-loading-2');
   }, [setQrCode]);
 
-  const handleDisconnect = useCallback((serverId: number) => {
-    whatsappSocket.disconnectWhatsApp(serverId);
-    toast.success(`WhatsApp ${serverId} disconnected`);
-  }, []);
+  const handleDisconnect = useCallback(async (serverId: number) => {
+    if (!user?.agencyId) return;
+
+    try {
+      // Call REST API to disconnect
+      await fetch(`${getServerUrl(serverId)}/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agencyId: user.agencyId }),
+      });
+
+      // Also disconnect via socket
+      whatsappSocket.disconnectWhatsApp(serverId);
+
+      // Clear QR and status
+      useWhatsAppStore.getState().setActiveServerQR(serverId, null);
+      useWhatsAppStore.getState().setServerStatuses({
+        ...serverStatuses,
+        [serverId]: {
+          status: 'disconnected',
+          account: null,
+        },
+      });
+
+      toast.success(`WhatsApp ${serverId} disconnected`);
+    } catch (err) {
+      console.error(`Error disconnecting server ${serverId}:`, err);
+      toast.error(`Failed to disconnect WhatsApp ${serverId}`);
+    }
+  }, [user?.agencyId, serverStatuses]);
 
   const handleRefreshChats = useCallback(() => {
     setLoading(true);
@@ -241,10 +379,10 @@ export const WhatsAppPage: React.FC = () => {
               ) : (
                 <button
                   onClick={() => handleRequestQR(1)}
-                  disabled={isConnecting}
+                  disabled={isConnecting[1]}
                   className="w-full px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50"
                 >
-                  {isConnecting ? 'Connecting...' : 'Connect WhatsApp 1'}
+                  {isConnecting[1] ? 'Connecting...' : 'Connect WhatsApp 1'}
                 </button>
               )}
             </div>
@@ -286,10 +424,10 @@ export const WhatsAppPage: React.FC = () => {
               ) : (
                 <button
                   onClick={() => handleRequestQR(2)}
-                  disabled={isConnecting}
+                  disabled={isConnecting[2]}
                   className="w-full px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50"
                 >
-                  {isConnecting ? 'Connecting...' : 'Connect WhatsApp 2'}
+                  {isConnecting[2] ? 'Connecting...' : 'Connect WhatsApp 2'}
                 </button>
               )}
             </div>

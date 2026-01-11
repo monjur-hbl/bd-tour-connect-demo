@@ -556,7 +556,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     serverId: SERVER_ID,
-    version: '3.0.0',
+    version: '3.1.0',
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
@@ -564,10 +564,126 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Get connection status - Miami-style REST endpoint for polling
+app.get('/status', (req, res) => {
+  const agencyId = req.query.agencyId;
+
+  if (!agencyId) {
+    return res.json({
+      serverId: SERVER_ID,
+      status: 'disconnected',
+      qrCode: null,
+      connectedAs: null,
+      lastError: null
+    });
+  }
+
+  const session = sessions.get(agencyId);
+
+  if (!session) {
+    return res.json({
+      serverId: SERVER_ID,
+      status: 'disconnected',
+      qrCode: null,
+      connectedAs: null,
+      lastError: null
+    });
+  }
+
+  res.json({
+    serverId: SERVER_ID,
+    status: session.status,
+    qrCode: session.qrCode,
+    connectedAs: session.info,
+    lastError: null
+  });
+});
+
+// Initialize/connect WhatsApp via REST
+app.post('/connect', async (req, res) => {
+  const { agencyId } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ success: false, error: 'agencyId required' });
+  }
+
+  console.log(`[REST] Connect request for ${agencyId}`);
+  await createSession(agencyId);
+
+  const session = sessions.get(agencyId);
+  res.json({
+    success: true,
+    serverId: SERVER_ID,
+    status: session?.status || 'connecting'
+  });
+});
+
+// Disconnect via REST
+app.post('/disconnect', async (req, res) => {
+  const { agencyId } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ success: false, error: 'agencyId required' });
+  }
+
+  console.log(`[REST] Disconnect request for ${agencyId}`);
+  await endSession(agencyId, true);
+
+  io.to(agencyId).emit('whatsapp:disconnected', {
+    serverId: SERVER_ID,
+    reason: 'user_logout'
+  });
+
+  res.json({ success: true, serverId: SERVER_ID });
+});
+
+// Restart connection via REST
+app.post('/restart', async (req, res) => {
+  const { agencyId } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ success: false, error: 'agencyId required' });
+  }
+
+  console.log(`[REST] Restart request for ${agencyId}`);
+
+  // End existing session
+  await endSession(agencyId, false);
+
+  // Create new session
+  await createSession(agencyId);
+
+  const session = sessions.get(agencyId);
+  res.json({
+    success: true,
+    serverId: SERVER_ID,
+    status: session?.status || 'connecting'
+  });
+});
+
+// Logout (clear auth) via REST
+app.post('/logout', async (req, res) => {
+  const { agencyId } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ success: false, error: 'agencyId required' });
+  }
+
+  console.log(`[REST] Logout request for ${agencyId}`);
+  await endSession(agencyId, true);
+
+  io.to(agencyId).emit('whatsapp:disconnected', {
+    serverId: SERVER_ID,
+    reason: 'logged_out'
+  });
+
+  res.json({ success: true, serverId: SERVER_ID, message: 'Logged out successfully' });
+});
+
 // Start server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server ${SERVER_ID} v3.0.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server ${SERVER_ID} v3.1.0 running on port ${PORT}`);
 });
 
 // Graceful shutdown
