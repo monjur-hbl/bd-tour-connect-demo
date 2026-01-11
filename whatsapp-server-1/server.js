@@ -169,14 +169,18 @@ async function createSession(agencyId) {
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      browser: Browsers.macOS('Chrome'),
+      // Use ubuntu browser - works better with WhatsApp Web
+      browser: Browsers.ubuntu('Chrome'),
+      // Connection settings from working miami implementation
+      connectTimeoutMs: 120000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 500,
+      emitOwnEvents: true,
       syncFullHistory: false,
-      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: true,
       getMessage: async () => undefined,
-      markOnlineOnConnect: false,
-      retryRequestDelayMs: 2000,
-      connectTimeoutMs: 60000,
-      qrTimeout: 40000
     });
 
     session.sock = sock;
@@ -556,7 +560,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     serverId: SERVER_ID,
-    version: '3.1.0',
+    version: '3.2.0',
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
@@ -683,7 +687,7 @@ app.post('/logout', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server ${SERVER_ID} v3.0.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server ${SERVER_ID} v3.2.0 running on port ${PORT}`);
 });
 
 // Graceful shutdown
