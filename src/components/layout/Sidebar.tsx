@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { clsx } from 'clsx';
 
@@ -182,9 +182,20 @@ const agentNavItems: NavItem[] = [
   }
 ];
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  mobileMenuOpen: boolean;
+  setMobileMenuOpen: (open: boolean) => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ mobileMenuOpen, setMobileMenuOpen }) => {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname, setMobileMenuOpen]);
 
   const handleLogout = () => {
     logout();
@@ -209,8 +220,8 @@ export const Sidebar: React.FC = () => {
 
   const badge = getRoleBadge();
 
-  return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-white border-r border-sand-200 flex flex-col z-50">
+  const SidebarContent = () => (
+    <>
       {/* Logo */}
       <div className="h-16 flex items-center px-6 border-b border-sand-100">
         <div className="flex items-center gap-3">
@@ -276,6 +287,86 @@ export const Sidebar: React.FC = () => {
           </button>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 bg-white border-r border-sand-200 flex-col z-50">
+        <SidebarContent />
+      </aside>
+
+      {/* Mobile Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Sidebar - slides in from right */}
+      <aside
+        className={clsx(
+          'lg:hidden fixed inset-y-0 right-0 w-72 bg-white border-l border-sand-200 flex flex-col z-50 transform transition-transform duration-300 ease-in-out',
+          mobileMenuOpen ? 'translate-x-0' : 'translate-x-full'
+        )}
+      >
+        {/* Close button */}
+        <button
+          onClick={() => setMobileMenuOpen(false)}
+          className="absolute top-4 left-4 p-2 text-sand-500 hover:text-sand-700 hover:bg-sand-100 rounded-lg transition-colors z-10"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <SidebarContent />
+      </aside>
+    </>
+  );
+};
+
+// Mobile Header Component with Hamburger Menu
+interface MobileHeaderProps {
+  onMenuClick: () => void;
+}
+
+export const MobileHeader: React.FC<MobileHeaderProps> = ({ onMenuClick }) => {
+  const { user } = useAuthStore();
+
+  return (
+    <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white border-b border-sand-200 flex items-center justify-between px-4 z-30">
+      {/* Logo */}
+      <div className="flex items-center gap-2">
+        <div className="w-8 h-8 bg-gradient-festive rounded-lg flex items-center justify-center shadow-festive">
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="font-bold text-sand-800 text-sm font-display">BD Tour Connect</h1>
+        </div>
+      </div>
+
+      {/* Right side: User avatar and Menu button */}
+      <div className="flex items-center gap-2">
+        {/* User avatar */}
+        <div className="w-8 h-8 bg-gradient-ocean rounded-full flex items-center justify-center text-white font-bold text-sm">
+          {user?.name?.charAt(0) || 'U'}
+        </div>
+
+        {/* Hamburger Menu Button */}
+        <button
+          onClick={onMenuClick}
+          className="p-2 text-sand-600 hover:text-sand-800 hover:bg-sand-100 rounded-lg transition-colors"
+          aria-label="Open menu"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
   );
 };
