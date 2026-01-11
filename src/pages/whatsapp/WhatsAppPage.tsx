@@ -133,7 +133,7 @@ export const WhatsAppPage: React.FC = () => {
   }, [setQrCode]);
 
   const handleDisconnect = useCallback((serverId: number) => {
-    whatsappSocket.disconnectAccount(serverId);
+    whatsappSocket.disconnectWhatsApp(serverId);
     toast.success(`WhatsApp ${serverId} disconnected`);
   }, []);
 
