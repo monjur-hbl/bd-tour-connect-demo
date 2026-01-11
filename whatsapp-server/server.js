@@ -6,10 +6,10 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   delay,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
-import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -21,7 +21,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
-// Pino logger for Baileys (silenced)
+// Silent logger for Baileys
 const logger = pino({ level: 'silent' });
 
 // CORS configuration
@@ -42,10 +42,8 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
-// Store WhatsApp clients
-const whatsappClients = new Map(); // agencyId_slot -> { socket, status, info, store }
-const activeReplies = new Map();
-const qrCodeStore = new Map();
+// Session storage - completely isolated per client
+const sessions = new Map(); // clientId -> { sock, status, info, qrCode, reconnecting }
 
 // Auth directory
 const authDir = path.join(__dirname, 'auth_sessions');
@@ -58,372 +56,371 @@ console.log(`Environment: ${isCloudRun ? 'Cloud Run/Production' : 'Local Develop
 
 // Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection:', reason);
+  console.error('Unhandled Rejection:', reason?.message || reason);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  console.error('Uncaught Exception:', error?.message || error);
 });
 
-// Initialize WhatsApp client using Baileys
-async function initializeClient(agencyId, slot) {
-  const clientId = `${agencyId}_${slot}`;
-
-  // Check for existing client
-  if (whatsappClients.has(clientId)) {
-    const existing = whatsappClients.get(clientId);
-    if (existing.status === 'connected') {
-      console.log(`Client ${clientId} already connected, emitting status`);
-      // Emit connected status to all clients in the room
-      io.to(agencyId).emit('whatsapp:connected', {
-        slot,
-        account: existing.info
-      });
-      return existing;
-    }
-    if (existing.status === 'qr_ready') {
-      const storedQr = qrCodeStore.get(clientId);
-      if (storedQr) {
-        console.log(`Resending stored QR for ${clientId}`);
-        io.to(agencyId).emit('whatsapp:qr', { slot, qrCode: storedQr });
-      }
-      return existing;
-    }
-    if (existing.status === 'connecting') {
-      console.log(`Client ${clientId} is connecting, waiting for QR...`);
-      return existing;
-    }
-    // Close existing connection if any
-    if (existing.socket) {
-      try {
-        existing.socket.end();
-      } catch (e) {}
+// Clean up corrupted auth state
+function cleanAuthState(clientId) {
+  const authPath = path.join(authDir, clientId);
+  if (fs.existsSync(authPath)) {
+    try {
+      fs.rmSync(authPath, { recursive: true, force: true });
+      console.log(`Cleaned auth state for ${clientId}`);
+    } catch (e) {
+      console.error(`Failed to clean auth state for ${clientId}:`, e.message);
     }
   }
+}
 
-  console.log(`Initializing WhatsApp client for ${clientId}`);
+// End session cleanly
+async function endSession(clientId, cleanAuth = false) {
+  const session = sessions.get(clientId);
+  if (session) {
+    session.reconnecting = false;
+    if (session.sock) {
+      try {
+        session.sock.ev.removeAllListeners();
+        await session.sock.logout().catch(() => {});
+        session.sock.end();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+    sessions.delete(clientId);
+  }
+  if (cleanAuth) {
+    cleanAuthState(clientId);
+  }
+}
 
+// Initialize a WhatsApp session
+async function createSession(agencyId, slot) {
+  const clientId = `${agencyId}_${slot}`;
+
+  // Check existing session
+  const existing = sessions.get(clientId);
+  if (existing) {
+    // If connected, just notify
+    if (existing.status === 'connected' && existing.info) {
+      console.log(`Session ${clientId} already connected`);
+      io.to(agencyId).emit('whatsapp:connected', { slot, account: existing.info });
+      return existing;
+    }
+
+    // If QR ready, resend QR
+    if (existing.status === 'qr_ready' && existing.qrCode) {
+      console.log(`Session ${clientId} has QR ready, resending`);
+      io.to(agencyId).emit('whatsapp:qr', { slot, qrCode: existing.qrCode });
+      return existing;
+    }
+
+    // If connecting, wait
+    if (existing.status === 'connecting') {
+      console.log(`Session ${clientId} is already connecting`);
+      return existing;
+    }
+
+    // Otherwise, clean up and recreate
+    await endSession(clientId, false);
+  }
+
+  console.log(`Creating new session: ${clientId}`);
+
+  // Create auth directory
   const authPath = path.join(authDir, clientId);
   if (!fs.existsSync(authPath)) {
     fs.mkdirSync(authPath, { recursive: true });
   }
 
-  const clientData = {
-    socket: null,
+  // Create session object
+  const session = {
+    sock: null,
     status: 'connecting',
     info: null,
+    qrCode: null,
     agencyId,
-    slot
+    slot,
+    reconnecting: false
   };
-
-  whatsappClients.set(clientId, clientData);
+  sessions.set(clientId, session);
 
   try {
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Using Baileys version: ${version.join('.')}, isLatest: ${isLatest}`);
+    const { version } = await fetchLatestBaileysVersion();
+    console.log(`Baileys version: ${version.join('.')}`);
 
     const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     const sock = makeWASocket({
       version,
       logger,
-      auth: state,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger)
+      },
       printQRInTerminal: false,
-      browser: ['BD Tour Connect', 'Chrome', '1.0.0'],
+      browser: [`BD Tour ${slot}`, 'Chrome', '1.0.0'],
       syncFullHistory: false,
-      getMessage: async () => undefined
+      generateHighQualityLinkPreview: false,
+      getMessage: async () => undefined,
+      // Prevent conflicts
+      markOnlineOnConnect: false,
+      retryRequestDelayMs: 2000
     });
 
-    clientData.socket = sock;
+    session.sock = sock;
 
-    // Handle connection updates
+    // Connection update handler
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      console.log(`Connection update for ${clientId}:`, { connection, hasQR: !!qr });
+      // Log meaningful updates only
+      if (connection || qr) {
+        console.log(`[${clientId}] connection=${connection || 'none'}, hasQR=${!!qr}`);
+      }
 
+      // QR Code received
       if (qr) {
-        clientData.status = 'qr_ready';
         try {
-          const qrDataUrl = await QRCode.toDataURL(qr, { width: 256, margin: 2 });
+          const qrDataUrl = await QRCode.toDataURL(qr, {
+            width: 256,
+            margin: 2,
+            errorCorrectionLevel: 'M'
+          });
           const qrBase64 = qrDataUrl.split(',')[1];
-          qrCodeStore.set(clientId, qrBase64);
 
-          console.log(`QR code generated for ${clientId}`);
+          session.status = 'qr_ready';
+          session.qrCode = qrBase64;
+
+          console.log(`[${clientId}] QR code generated`);
           io.to(agencyId).emit('whatsapp:qr', { slot, qrCode: qrBase64 });
         } catch (err) {
-          console.error('QR generation error:', err);
+          console.error(`[${clientId}] QR generation error:`, err.message);
         }
       }
 
-      if (connection === 'close') {
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-        console.log(`Connection closed for ${clientId}:`, {
-          statusCode,
-          reason: lastDisconnect?.error?.message,
-          shouldReconnect
-        });
-
-        qrCodeStore.delete(clientId);
-        clientData.status = 'disconnected';
-        clientData.info = null;
-
-        io.to(agencyId).emit('whatsapp:disconnected', {
-          slot,
-          reason: lastDisconnect?.error?.message || 'connection_closed'
-        });
-
-        if (shouldReconnect) {
-          console.log(`Will attempt to reconnect ${clientId} in 5 seconds...`);
-          await delay(5000);
-          initializeClient(agencyId, slot);
-        } else {
-          whatsappClients.delete(clientId);
-          // Clean up auth files for logged out user
-          if (fs.existsSync(authPath)) {
-            fs.rmSync(authPath, { recursive: true, force: true });
-          }
-        }
-      }
-
+      // Connection opened
       if (connection === 'open') {
-        console.log(`WhatsApp connected for ${clientId}!`);
-        clientData.status = 'connected';
-        qrCodeStore.delete(clientId);
+        console.log(`[${clientId}] Connected!`);
+        session.status = 'connected';
+        session.qrCode = null;
+        session.reconnecting = false;
 
         try {
           const user = sock.user;
-          clientData.info = {
+          session.info = {
             id: clientId,
             phoneNumber: user?.id?.split(':')[0] || user?.id?.split('@')[0] || 'unknown',
             name: user?.name || user?.verifiedName || 'WhatsApp User',
-            platform: 'web'
+            platform: 'baileys'
           };
 
-          console.log(`Connected as: ${clientData.info.phoneNumber} (${clientData.info.name})`);
-
-          io.to(agencyId).emit('whatsapp:connected', {
-            slot,
-            account: clientData.info
-          });
-
-          // Fetch initial chats after a short delay
-          await delay(2000);
-          const chats = await sock.groupFetchAllParticipating();
-          const chatList = Object.values(chats || {}).slice(0, 50).map(chat => formatChat(chat, clientId));
-
-          io.to(agencyId).emit('whatsapp:chats', { slot, chats: chatList });
+          console.log(`[${clientId}] Phone: ${session.info.phoneNumber}, Name: ${session.info.name}`);
+          io.to(agencyId).emit('whatsapp:connected', { slot, account: session.info });
         } catch (err) {
-          console.error('Error getting user info:', err);
+          console.error(`[${clientId}] Error getting user info:`, err.message);
+        }
+      }
+
+      // Connection closed
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const errorMessage = lastDisconnect?.error?.message || 'unknown';
+
+        console.log(`[${clientId}] Closed: status=${statusCode}, reason=${errorMessage}`);
+
+        session.qrCode = null;
+
+        // Handle different disconnect reasons
+        if (statusCode === DisconnectReason.loggedOut) {
+          // User logged out - clean everything
+          console.log(`[${clientId}] Logged out, cleaning session`);
+          await endSession(clientId, true);
+          io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'logged_out' });
+        } else if (statusCode === 401 || statusCode === 403) {
+          // Auth error - clean and notify
+          console.log(`[${clientId}] Auth error, cleaning session`);
+          await endSession(clientId, true);
+          io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'auth_error' });
+        } else if (statusCode === 408 || statusCode === 428) {
+          // QR timeout or connection terminated - allow retry
+          console.log(`[${clientId}] QR/connection timeout`);
+          session.status = 'disconnected';
+          io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'timeout' });
+          // Don't auto-reconnect for QR timeout
+          sessions.delete(clientId);
+        } else if (statusCode === 515) {
+          // Stream error - attempt reconnect once
+          if (!session.reconnecting) {
+            console.log(`[${clientId}] Stream error, will reconnect...`);
+            session.reconnecting = true;
+            session.status = 'connecting';
+            await delay(3000);
+            if (sessions.has(clientId)) {
+              createSession(agencyId, slot);
+            }
+          } else {
+            console.log(`[${clientId}] Already tried reconnecting, giving up`);
+            await endSession(clientId, false);
+            io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'connection_failed' });
+          }
+        } else {
+          // Other errors - notify disconnect
+          session.status = 'disconnected';
+          io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: errorMessage });
+          sessions.delete(clientId);
         }
       }
     });
 
-    // Handle credentials update
+    // Save credentials on update
     sock.ev.on('creds.update', saveCreds);
 
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
 
-      for (const message of messages) {
-        if (message.key.fromMe) continue;
+      for (const msg of messages) {
+        if (msg.key.fromMe) continue;
 
         try {
-          const formattedMessage = formatMessage(message, clientId);
+          const content = msg.message;
+          let body = '';
+          let msgType = 'text';
 
-          io.to(agencyId).emit('whatsapp:message', {
-            slot,
-            message: formattedMessage,
-            chat: {
-              id: message.key.remoteJid,
-              accountId: clientId
-            }
-          });
+          if (content?.conversation) {
+            body = content.conversation;
+          } else if (content?.extendedTextMessage?.text) {
+            body = content.extendedTextMessage.text;
+          } else if (content?.imageMessage) {
+            msgType = 'image';
+            body = content.imageMessage.caption || '[Image]';
+          } else if (content?.videoMessage) {
+            msgType = 'video';
+            body = content.videoMessage.caption || '[Video]';
+          } else if (content?.audioMessage) {
+            msgType = 'audio';
+            body = '[Audio]';
+          } else if (content?.documentMessage) {
+            msgType = 'document';
+            body = content.documentMessage.fileName || '[Document]';
+          } else {
+            body = '[Message]';
+          }
 
+          const formattedMsg = {
+            id: msg.key.id,
+            accountId: clientId,
+            chatId: msg.key.remoteJid,
+            fromMe: false,
+            type: msgType,
+            body,
+            timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
+            status: 'delivered'
+          };
+
+          io.to(agencyId).emit('whatsapp:message', { slot, message: formattedMsg });
           io.to(agencyId).emit('whatsapp:notification', {
             slot,
-            chatId: message.key.remoteJid,
-            message: formattedMessage,
+            chatId: msg.key.remoteJid,
+            message: formattedMsg,
             contact: {
-              name: message.pushName || message.key.remoteJid.split('@')[0],
-              phoneNumber: message.key.remoteJid.split('@')[0]
+              name: msg.pushName || msg.key.remoteJid.split('@')[0],
+              phoneNumber: msg.key.remoteJid.split('@')[0]
             }
           });
         } catch (err) {
-          console.error('Error processing message:', err);
+          console.error(`[${clientId}] Message processing error:`, err.message);
         }
       }
     });
 
-    return clientData;
+    return session;
 
   } catch (err) {
-    console.error(`Failed to initialize ${clientId}:`, err);
-    clientData.status = 'disconnected';
-    whatsappClients.delete(clientId);
-
-    io.to(agencyId).emit('whatsapp:error', {
-      error: `Failed to initialize WhatsApp: ${err.message}`
-    });
-
+    console.error(`[${clientId}] Session creation failed:`, err.message);
+    sessions.delete(clientId);
+    io.to(agencyId).emit('whatsapp:error', { error: `Failed to create session: ${err.message}` });
     return null;
   }
 }
 
-// Format chat
-function formatChat(chat, clientId) {
-  return {
-    id: chat.id,
-    accountId: clientId,
-    contact: {
-      id: chat.id,
-      phoneNumber: chat.id.split('@')[0],
-      name: chat.subject || chat.name || chat.id.split('@')[0],
-      isGroup: chat.id.endsWith('@g.us')
-    },
-    type: chat.id.endsWith('@g.us') ? 'group' : 'individual',
-    unreadCount: 0,
-    isPinned: false,
-    isMuted: false,
-    isArchived: false
-  };
-}
-
-// Format message
-function formatMessage(message, clientId) {
-  const content = message.message;
-  let body = '';
-  let type = 'text';
-
-  if (content?.conversation) {
-    body = content.conversation;
-  } else if (content?.extendedTextMessage?.text) {
-    body = content.extendedTextMessage.text;
-  } else if (content?.imageMessage) {
-    type = 'image';
-    body = content.imageMessage.caption || '[Image]';
-  } else if (content?.videoMessage) {
-    type = 'video';
-    body = content.videoMessage.caption || '[Video]';
-  } else if (content?.audioMessage) {
-    type = 'audio';
-    body = '[Audio]';
-  } else if (content?.documentMessage) {
-    type = 'document';
-    body = content.documentMessage.fileName || '[Document]';
-  }
-
-  return {
-    id: message.key.id,
-    accountId: clientId,
-    chatId: message.key.remoteJid,
-    fromMe: message.key.fromMe,
-    from: message.key.remoteJid,
-    type,
-    body,
-    timestamp: new Date((message.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-    status: 'delivered'
-  };
-}
-
 // Socket.IO handlers
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('Socket connected:', socket.id);
 
   socket.on('join', ({ agencyId }) => {
     socket.join(agencyId);
     socket.agencyId = agencyId;
-    console.log(`Socket ${socket.id} joined agency ${agencyId}`);
+    console.log(`Socket ${socket.id} joined ${agencyId}`);
 
-    // Send current statuses for all clients in this agency
-    for (const [clientId, clientData] of whatsappClients.entries()) {
-      if (clientData.agencyId === agencyId) {
-        console.log(`Sending status for ${clientId}: ${clientData.status}`);
-
-        // Send status update
+    // Send current session states
+    for (const [clientId, session] of sessions.entries()) {
+      if (session.agencyId === agencyId) {
+        // Send status
         socket.emit('whatsapp:status', {
-          slot: clientData.slot,
-          status: clientData.status,
-          account: clientData.info
+          slot: session.slot,
+          status: session.status,
+          account: session.info
         });
 
-        // If connected, also emit connected event
-        if (clientData.status === 'connected' && clientData.info) {
+        // Send connected event if connected
+        if (session.status === 'connected' && session.info) {
           socket.emit('whatsapp:connected', {
-            slot: clientData.slot,
-            account: clientData.info
+            slot: session.slot,
+            account: session.info
           });
         }
 
-        // If QR is ready, send it
-        if (clientData.status === 'qr_ready') {
-          const storedQr = qrCodeStore.get(clientId);
-          if (storedQr) {
-            socket.emit('whatsapp:qr', {
-              slot: clientData.slot,
-              qrCode: storedQr
-            });
-          }
+        // Send QR if available
+        if (session.status === 'qr_ready' && session.qrCode) {
+          socket.emit('whatsapp:qr', {
+            slot: session.slot,
+            qrCode: session.qrCode
+          });
         }
       }
     }
   });
 
   socket.on('whatsapp:connect', async ({ agencyId, slot }) => {
-    console.log(`=== Connect request: agency=${agencyId}, slot=${slot} ===`);
-    await initializeClient(agencyId || socket.agencyId, slot || 1);
+    const targetAgency = agencyId || socket.agencyId;
+    const targetSlot = slot || 1;
+    console.log(`=== Connect request: ${targetAgency}_${targetSlot} ===`);
+    await createSession(targetAgency, targetSlot);
   });
 
   socket.on('whatsapp:disconnect', async ({ agencyId, slot }) => {
     const clientId = `${agencyId}_${slot}`;
-    const clientData = whatsappClients.get(clientId);
-
-    if (clientData?.socket) {
-      try {
-        await clientData.socket.logout();
-        clientData.socket.end();
-      } catch (err) {
-        console.error('Disconnect error:', err);
-      }
-      whatsappClients.delete(clientId);
-      qrCodeStore.delete(clientId);
-
-      // Clean up auth
-      const authPath = path.join(authDir, clientId);
-      if (fs.existsSync(authPath)) {
-        fs.rmSync(authPath, { recursive: true, force: true });
-      }
-
-      io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'user_logout' });
-    }
+    console.log(`=== Disconnect request: ${clientId} ===`);
+    await endSession(clientId, true);
+    io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'user_logout' });
   });
 
   socket.on('whatsapp:send', async ({ agencyId, slot, chatId, message }) => {
     const clientId = `${agencyId}_${slot}`;
-    const clientData = whatsappClients.get(clientId);
+    const session = sessions.get(clientId);
 
-    if (!clientData?.socket || clientData.status !== 'connected') {
+    if (!session?.sock || session.status !== 'connected') {
       socket.emit('whatsapp:error', { error: 'WhatsApp not connected' });
       return;
     }
 
     try {
-      let sentMessage;
-
+      let result;
       if (message.type === 'text') {
-        sentMessage = await clientData.socket.sendMessage(chatId, { text: message.body });
+        result = await session.sock.sendMessage(chatId, { text: message.body });
       }
-      // TODO: Add media message support
 
-      if (sentMessage) {
+      if (result) {
         io.to(agencyId).emit('whatsapp:message_sent', {
           slot,
           chatId,
           message: {
-            id: sentMessage.key.id,
+            id: result.key.id,
             accountId: clientId,
             chatId,
             fromMe: true,
@@ -435,103 +432,100 @@ io.on('connection', (socket) => {
         });
       }
     } catch (err) {
-      console.error('Send error:', err);
+      console.error(`[${clientId}] Send failed:`, err.message);
       socket.emit('whatsapp:error', { error: 'Failed to send message' });
     }
   });
 
   socket.on('whatsapp:fetch_chats', async ({ agencyId, slot }) => {
     const clientId = `${agencyId}_${slot}`;
-    const clientData = whatsappClients.get(clientId);
+    const session = sessions.get(clientId);
 
-    if (!clientData?.socket || clientData.status !== 'connected') {
+    if (!session?.sock || session.status !== 'connected') {
       socket.emit('whatsapp:error', { error: 'WhatsApp not connected' });
       return;
     }
 
     try {
-      const chats = await clientData.socket.groupFetchAllParticipating();
-      const chatList = Object.values(chats || {}).slice(0, 100).map(chat => formatChat(chat, clientId));
+      const groups = await session.sock.groupFetchAllParticipating();
+      const chatList = Object.values(groups || {}).slice(0, 100).map(chat => ({
+        id: chat.id,
+        accountId: clientId,
+        contact: {
+          id: chat.id,
+          phoneNumber: chat.id.split('@')[0],
+          name: chat.subject || chat.name || chat.id.split('@')[0],
+          isGroup: chat.id.endsWith('@g.us')
+        },
+        type: chat.id.endsWith('@g.us') ? 'group' : 'individual',
+        unreadCount: 0,
+        isPinned: false,
+        isMuted: false,
+        isArchived: false
+      }));
+
       socket.emit('whatsapp:chats', { slot, chats: chatList });
     } catch (err) {
-      console.error('Fetch chats error:', err);
+      console.error(`[${clientId}] Fetch chats failed:`, err.message);
       socket.emit('whatsapp:error', { error: 'Failed to fetch chats' });
     }
   });
 
-  socket.on('whatsapp:start_reply', ({ agencyId, chatId, userId, userName }) => {
-    activeReplies.set(chatId, { userId, userName, timestamp: Date.now() });
-    io.to(agencyId).emit('whatsapp:reply_started', { chatId, userId, userName });
-  });
-
-  socket.on('whatsapp:stop_reply', ({ agencyId, chatId, userId }) => {
-    const existing = activeReplies.get(chatId);
-    if (existing?.userId === userId) {
-      activeReplies.delete(chatId);
-      io.to(agencyId).emit('whatsapp:reply_cleared', { chatId });
-    }
-  });
-
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.log('Socket disconnected:', socket.id);
   });
 });
 
 // REST API
 app.get('/api/health', (req, res) => {
-  const clientStatuses = [];
-  for (const [clientId, clientData] of whatsappClients.entries()) {
-    clientStatuses.push({
-      id: clientId,
-      status: clientData.status,
-      hasQR: qrCodeStore.has(clientId)
+  const sessionList = [];
+  for (const [id, session] of sessions.entries()) {
+    sessionList.push({
+      id,
+      status: session.status,
+      hasQR: !!session.qrCode,
+      hasInfo: !!session.info
     });
   }
 
   res.json({
     status: 'ok',
-    version: '2.0.0',
+    version: '2.1.0',
     environment: isCloudRun ? 'cloud-run' : 'local',
-    clients: whatsappClients.size,
-    clientStatuses,
-    socketConnections: io.engine.clientsCount
+    sessions: sessions.size,
+    sessionList,
+    connections: io.engine.clientsCount
   });
 });
 
-app.get('/api/status/:agencyId', (req, res) => {
+app.get('/api/sessions/:agencyId', (req, res) => {
   const { agencyId } = req.params;
-  const statuses = [];
+  const agencySessions = [];
 
-  for (const [clientId, clientData] of whatsappClients.entries()) {
-    if (clientData.agencyId === agencyId) {
-      statuses.push({
-        slot: clientData.slot,
-        status: clientData.status,
-        account: clientData.info
+  for (const [id, session] of sessions.entries()) {
+    if (session.agencyId === agencyId) {
+      agencySessions.push({
+        slot: session.slot,
+        status: session.status,
+        account: session.info
       });
     }
   }
 
-  res.json({ statuses });
+  res.json({ sessions: agencySessions });
 });
 
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp server v2.0.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server v2.1.0 running on port ${PORT}`);
 });
 
-// Cleanup on exit
+// Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
-  for (const [clientId, clientData] of whatsappClients.entries()) {
-    try {
-      if (clientData.socket) {
-        clientData.socket.end();
-      }
-    } catch (err) {
-      console.error(`Error closing ${clientId}:`, err);
-    }
+  for (const [clientId] of sessions.entries()) {
+    await endSession(clientId, false);
   }
   process.exit(0);
 });
