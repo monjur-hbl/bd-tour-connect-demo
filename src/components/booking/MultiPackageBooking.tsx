@@ -103,6 +103,8 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
   const [paymentData, setPaymentData] = useState({
     paymentMethod: 'cash',
     advancePaid: 0,
+    discountAmount: 0,
+    discountReason: '',
     source: 'walk-in',
     notes: '',
   });
@@ -256,12 +258,17 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     }, 0);
   };
 
-  // Calculate grand total
-  const grandTotal = useMemo(() => {
+  // Calculate subtotal (before discount)
+  const subtotalBeforeDiscount = useMemo(() => {
     return packageBookings.reduce((total, booking) => {
       return total + calculatePackageSubtotal(booking);
     }, 0);
   }, [packageBookings]);
+
+  // Calculate grand total (after discount)
+  const grandTotal = useMemo(() => {
+    return Math.max(0, subtotalBeforeDiscount - (paymentData.discountAmount || 0));
+  }, [subtotalBeforeDiscount, paymentData.discountAmount]);
 
   // Update booking field
   const updateBookingField = (bookingIndex: number, field: keyof PackageBooking, value: any) => {
@@ -341,6 +348,11 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           ? booking.customDroppingPoint
           : booking.droppingPoint;
 
+        // Calculate proportional discount for this booking
+        const discountProportion = subtotalBeforeDiscount > 0 ? subtotal / subtotalBeforeDiscount : 0;
+        const bookingDiscount = Math.round(paymentData.discountAmount * discountProportion);
+        const finalAmount = subtotal - bookingDiscount;
+
         const bookingData = {
           packageId: booking.package.id,
           agencyId: user.agencyId,
@@ -353,8 +365,11 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           passengers: passengersWithSeats,
           boardingPoint: booking.boardingPoint || undefined,
           droppingPoint: droppingPoint || undefined,
-          totalAmount: subtotal,
-          advancePaid: Math.round((Number(paymentData.advancePaid) / grandTotal) * subtotal),
+          subtotal,
+          discountAmount: bookingDiscount,
+          discountReason: paymentData.discountReason || undefined,
+          totalAmount: finalAmount,
+          advancePaid: grandTotal > 0 ? Math.round((Number(paymentData.advancePaid) / grandTotal) * finalAmount) : 0,
           paymentMethod: paymentData.paymentMethod,
           source: paymentData.source,
           notes: paymentData.notes || undefined,
@@ -1004,13 +1019,68 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
                 </div>
               ))}
 
-              <div className="pt-4 border-t-2 border-sand-200">
-                <div className="flex items-center justify-between text-xl font-bold">
+              {/* Subtotal, Discount, and Grand Total */}
+              <div className="pt-4 border-t-2 border-sand-200 space-y-2">
+                <div className="flex items-center justify-between text-sand-600">
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(subtotalBeforeDiscount)}</span>
+                </div>
+                {paymentData.discountAmount > 0 && (
+                  <div className="flex items-center justify-between text-green-600">
+                    <span>Discount {paymentData.discountReason && `(${paymentData.discountReason})`}</span>
+                    <span>-{formatCurrency(paymentData.discountAmount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-xl font-bold pt-2 border-t border-sand-200">
                   <span>Grand Total</span>
                   <span className="text-primary-600">{formatCurrency(grandTotal)}</span>
                 </div>
               </div>
             </div>
+          </Card>
+
+          {/* Discount Section */}
+          <Card className="border-2 border-dashed border-green-200 bg-green-50/50">
+            <h3 className="font-semibold text-green-700 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Apply Discount
+              <span className="font-bengali text-green-500 font-normal text-sm">(ছাড় দিন)</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-sand-700 mb-1">
+                  Discount Amount (BDT)
+                </label>
+                <input
+                  type="number"
+                  value={paymentData.discountAmount}
+                  onChange={(e) => setPaymentData(prev => ({ ...prev, discountAmount: Math.min(Number(e.target.value), subtotalBeforeDiscount) }))}
+                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  min={0}
+                  max={subtotalBeforeDiscount}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-sand-700 mb-1">
+                  Discount Reason (optional)
+                </label>
+                <input
+                  type="text"
+                  value={paymentData.discountReason}
+                  onChange={(e) => setPaymentData(prev => ({ ...prev, discountReason: e.target.value }))}
+                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="e.g., Loyalty discount, Group booking..."
+                />
+              </div>
+            </div>
+            {paymentData.discountAmount > 0 && (
+              <p className="mt-3 text-sm text-green-700">
+                Saving {formatCurrency(paymentData.discountAmount)} ({Math.round((paymentData.discountAmount / subtotalBeforeDiscount) * 100)}% off)
+              </p>
+            )}
           </Card>
 
           {/* Payment Details */}

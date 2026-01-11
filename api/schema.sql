@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS packages (
   advance_amount REAL DEFAULT 0,
   boarding_points TEXT, -- JSON array
   dropping_points TEXT, -- JSON array
+  hosts TEXT, -- JSON array of tour hosts/guides with name and mobile
   inclusions TEXT, -- JSON array
   exclusions TEXT, -- JSON array
   meal_plan TEXT, -- JSON array
@@ -94,6 +95,9 @@ CREATE TABLE IF NOT EXISTS bookings (
   passengers TEXT NOT NULL, -- JSON array
   boarding_point TEXT,
   dropping_point TEXT,
+  subtotal REAL, -- Amount before discount
+  discount_amount REAL DEFAULT 0, -- Discount applied
+  discount_reason TEXT, -- Reason for discount
   total_amount REAL NOT NULL,
   advance_paid REAL DEFAULT 0,
   due_amount REAL NOT NULL,
@@ -139,3 +143,15 @@ CREATE INDEX IF NOT EXISTS idx_bookings_agent ON bookings(agent_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_guest_phone ON bookings(guest_phone);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- ============================================
+-- MIGRATIONS for existing databases
+-- ============================================
+
+-- Add hosts column to packages (for tour guides/coordinators)
+-- Run: ALTER TABLE packages ADD COLUMN hosts TEXT;
+
+-- Add discount columns to bookings
+-- Run: ALTER TABLE bookings ADD COLUMN subtotal REAL;
+-- Run: ALTER TABLE bookings ADD COLUMN discount_amount REAL DEFAULT 0;
+-- Run: ALTER TABLE bookings ADD COLUMN discount_reason TEXT;

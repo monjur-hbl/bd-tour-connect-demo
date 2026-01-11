@@ -59,6 +59,7 @@ export interface TourPackage {
   advanceAmount: number;
   boardingPoints: BoardingPoint[];
   droppingPoints: BoardingPoint[];
+  hosts?: TourHost[];
   inclusions: string[];
   exclusions: string[];
   mealPlan: MealDay[];
@@ -73,9 +74,17 @@ export interface TourPackage {
 export interface BoardingPoint {
   id: string;
   name: string;
-  nameBn: string;
+  nameBn?: string;
   time: string;
-  address: string;
+  address?: string;
+}
+
+export interface TourHost {
+  id: string;
+  name: string;
+  nameBn?: string;
+  mobile: string;
+  role?: string; // e.g., "Tour Guide", "Coordinator", "Driver"
 }
 
 export interface MealDay {
@@ -100,6 +109,9 @@ export interface Booking {
   passengers: Passenger[];
   boardingPoint: string;
   droppingPoint: string;
+  subtotal: number;
+  discountAmount: number;
+  discountReason?: string;
   totalAmount: number;
   advancePaid: number;
   dueAmount: number;

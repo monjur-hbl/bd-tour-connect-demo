@@ -5,9 +5,12 @@ import { Card } from '../../components/common/Card';
 import { PackageDetailsModal } from '../../components/package';
 import { packagesAPI } from '../../services/api';
 import { BusSeatLayoutBuilder } from '../../components/seats';
-import { BusConfiguration, SeatLayout } from '../../types';
+import { BusConfiguration, SeatLayout, BoardingPoint, TourHost } from '../../types';
 import { getDefaultBusConfig, createSeatLayout } from '../../utils/seatUtils';
 import toast from 'react-hot-toast';
+
+// Helper to generate unique IDs
+const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 interface Package {
   id: string;
@@ -27,8 +30,9 @@ interface Package {
   couplePrice: number;
   childPrice: number;
   advanceAmount: number;
-  boardingPoints: { id: string; name: string; nameBn: string; time: string; address: string }[];
-  droppingPoints: { id: string; name: string; nameBn: string; time: string; address: string }[];
+  boardingPoints: BoardingPoint[];
+  droppingPoints: BoardingPoint[];
+  hosts?: TourHost[];
   inclusions: string[];
   exclusions: string[];
   status: string;
@@ -94,6 +98,11 @@ export const PackageManagement: React.FC = () => {
   const [enableSeatLayout, setEnableSeatLayout] = useState(false);
   const [busConfiguration, setBusConfiguration] = useState<BusConfiguration | undefined>(undefined);
 
+  // Boarding points, dropping points, and hosts state
+  const [boardingPoints, setBoardingPoints] = useState<BoardingPoint[]>([]);
+  const [droppingPoints, setDroppingPoints] = useState<BoardingPoint[]>([]);
+  const [hosts, setHosts] = useState<TourHost[]>([]);
+
   useEffect(() => {
     fetchPackages();
   }, [user?.agencyId, filterStatus]);
@@ -140,6 +149,10 @@ export const PackageManagement: React.FC = () => {
       // Load bus configuration if exists
       setEnableSeatLayout(!!pkg.busConfiguration);
       setBusConfiguration(pkg.busConfiguration);
+      // Load boarding points, dropping points, and hosts
+      setBoardingPoints(pkg.boardingPoints || []);
+      setDroppingPoints(pkg.droppingPoints || []);
+      setHosts(pkg.hosts || []);
     } else {
       setEditingPackage(null);
       setFormData({
@@ -163,6 +176,9 @@ export const PackageManagement: React.FC = () => {
         status: 'draft',
       });
       setEnableSeatLayout(false);
+      setBoardingPoints([]);
+      setDroppingPoints([]);
+      setHosts([]);
       setBusConfiguration(undefined);
     }
     setShowModal(true);
@@ -204,6 +220,9 @@ export const PackageManagement: React.FC = () => {
         childPrice: Number(formData.childPrice) || null,
         advanceAmount: Number(formData.advanceAmount) || 0,
         totalSeats,
+        boardingPoints,
+        droppingPoints,
+        hosts,
         inclusions: formData.inclusions.split(',').map(s => s.trim()).filter(Boolean),
         exclusions: formData.exclusions.split(',').map(s => s.trim()).filter(Boolean),
         busConfiguration: enableSeatLayout ? busConfiguration : null,
@@ -628,6 +647,240 @@ export const PackageManagement: React.FC = () => {
                   />
                 </div>
               )}
+
+              {/* Boarding Points */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sand-700">
+                    Boarding Points
+                    <span className="font-bengali text-sand-500 font-normal text-sm ml-2">(উঠার স্থান)</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setBoardingPoints([...boardingPoints, { id: generateId(), name: '', time: '' }])}
+                    className="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                  >
+                    + Add Point
+                  </button>
+                </div>
+                {boardingPoints.length === 0 ? (
+                  <p className="text-sm text-sand-400 italic">No boarding points added yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {boardingPoints.map((point, index) => (
+                      <div key={point.id} className="flex gap-3 items-start p-3 bg-sand-50 rounded-xl">
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
+                          <input
+                            type="text"
+                            value={point.name}
+                            onChange={(e) => {
+                              const updated = [...boardingPoints];
+                              updated[index] = { ...point, name: e.target.value };
+                              setBoardingPoints(updated);
+                            }}
+                            placeholder="Location name"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={point.nameBn || ''}
+                            onChange={(e) => {
+                              const updated = [...boardingPoints];
+                              updated[index] = { ...point, nameBn: e.target.value };
+                              setBoardingPoints(updated);
+                            }}
+                            placeholder="নাম (বাংলা)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-bengali"
+                          />
+                          <input
+                            type="time"
+                            value={point.time}
+                            onChange={(e) => {
+                              const updated = [...boardingPoints];
+                              updated[index] = { ...point, time: e.target.value };
+                              setBoardingPoints(updated);
+                            }}
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={point.address || ''}
+                            onChange={(e) => {
+                              const updated = [...boardingPoints];
+                              updated[index] = { ...point, address: e.target.value };
+                              setBoardingPoints(updated);
+                            }}
+                            placeholder="Address (optional)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setBoardingPoints(boardingPoints.filter((_, i) => i !== index))}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Dropping Points */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sand-700">
+                    Dropping Points
+                    <span className="font-bengali text-sand-500 font-normal text-sm ml-2">(নামার স্থান)</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setDroppingPoints([...droppingPoints, { id: generateId(), name: '', time: '' }])}
+                    className="px-3 py-1.5 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                  >
+                    + Add Point
+                  </button>
+                </div>
+                {droppingPoints.length === 0 ? (
+                  <p className="text-sm text-sand-400 italic">No dropping points added yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {droppingPoints.map((point, index) => (
+                      <div key={point.id} className="flex gap-3 items-start p-3 bg-sand-50 rounded-xl">
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <input
+                            type="text"
+                            value={point.name}
+                            onChange={(e) => {
+                              const updated = [...droppingPoints];
+                              updated[index] = { ...point, name: e.target.value };
+                              setDroppingPoints(updated);
+                            }}
+                            placeholder="Location name"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={point.nameBn || ''}
+                            onChange={(e) => {
+                              const updated = [...droppingPoints];
+                              updated[index] = { ...point, nameBn: e.target.value };
+                              setDroppingPoints(updated);
+                            }}
+                            placeholder="নাম (বাংলা)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-bengali"
+                          />
+                          <input
+                            type="text"
+                            value={point.address || ''}
+                            onChange={(e) => {
+                              const updated = [...droppingPoints];
+                              updated[index] = { ...point, address: e.target.value };
+                              setDroppingPoints(updated);
+                            }}
+                            placeholder="Address (optional)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDroppingPoints(droppingPoints.filter((_, i) => i !== index))}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Tour Hosts */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sand-700">
+                    Tour Hosts / Guides
+                    <span className="font-bengali text-sand-500 font-normal text-sm ml-2">(হোস্ট / গাইড)</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setHosts([...hosts, { id: generateId(), name: '', mobile: '', role: '' }])}
+                    className="px-3 py-1.5 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                  >
+                    + Add Host
+                  </button>
+                </div>
+                {hosts.length === 0 ? (
+                  <p className="text-sm text-sand-400 italic">No hosts added yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {hosts.map((host, index) => (
+                      <div key={host.id} className="flex gap-3 items-start p-3 bg-blue-50 rounded-xl">
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
+                          <input
+                            type="text"
+                            value={host.name}
+                            onChange={(e) => {
+                              const updated = [...hosts];
+                              updated[index] = { ...host, name: e.target.value };
+                              setHosts(updated);
+                            }}
+                            placeholder="Host name"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={host.nameBn || ''}
+                            onChange={(e) => {
+                              const updated = [...hosts];
+                              updated[index] = { ...host, nameBn: e.target.value };
+                              setHosts(updated);
+                            }}
+                            placeholder="নাম (বাংলা)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-bengali"
+                          />
+                          <input
+                            type="tel"
+                            value={host.mobile}
+                            onChange={(e) => {
+                              const updated = [...hosts];
+                              updated[index] = { ...host, mobile: e.target.value };
+                              setHosts(updated);
+                            }}
+                            placeholder="Mobile number"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={host.role || ''}
+                            onChange={(e) => {
+                              const updated = [...hosts];
+                              updated[index] = { ...host, role: e.target.value };
+                              setHosts(updated);
+                            }}
+                            placeholder="Role (e.g., Guide, Driver)"
+                            className="px-3 py-2 border border-sand-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setHosts(hosts.filter((_, i) => i !== index))}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Pricing */}
               <div className="space-y-4">

@@ -393,6 +393,7 @@ async function handleGetPackages(request: Request, env: Env): Promise<Response> 
     advanceAmount: p.advance_amount,
     boardingPoints: p.boarding_points ? JSON.parse(p.boarding_points) : [],
     droppingPoints: p.dropping_points ? JSON.parse(p.dropping_points) : [],
+    hosts: p.hosts ? JSON.parse(p.hosts) : [],
     inclusions: p.inclusions ? JSON.parse(p.inclusions) : [],
     exclusions: p.exclusions ? JSON.parse(p.exclusions) : [],
     mealPlan: p.meal_plan ? JSON.parse(p.meal_plan) : [],
@@ -434,6 +435,7 @@ async function handleGetPackage(packageId: string, env: Env): Promise<Response> 
       advanceAmount: pkg.advance_amount,
       boardingPoints: pkg.boarding_points ? JSON.parse(pkg.boarding_points as string) : [],
       droppingPoints: pkg.dropping_points ? JSON.parse(pkg.dropping_points as string) : [],
+      hosts: pkg.hosts ? JSON.parse(pkg.hosts as string) : [],
       inclusions: pkg.inclusions ? JSON.parse(pkg.inclusions as string) : [],
       exclusions: pkg.exclusions ? JSON.parse(pkg.exclusions as string) : [],
       mealPlan: pkg.meal_plan ? JSON.parse(pkg.meal_plan as string) : [],
@@ -450,14 +452,15 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
   const id = `pkg-${Date.now()}`;
 
   await env.DB.prepare(`
-    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, inclusions, exclusions, meal_plan, bus_configuration, seat_layout, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, hosts, inclusions, exclusions, meal_plan, bus_configuration, seat_layout, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, body.agencyId, body.title, body.titleBn || null, body.destination, body.destinationBn || null,
     body.description || null, body.descriptionBn || null, body.departureDate, body.returnDate,
     body.departureTime || null, body.vehicleType || null, body.totalSeats, body.totalSeats,
     body.pricePerPerson, body.couplePrice || null, body.childPrice || null, body.advanceAmount || 0,
     JSON.stringify(body.boardingPoints || []), JSON.stringify(body.droppingPoints || []),
+    JSON.stringify(body.hosts || []),
     JSON.stringify(body.inclusions || []), JSON.stringify(body.exclusions || []),
     JSON.stringify(body.mealPlan || []),
     body.busConfiguration ? JSON.stringify(body.busConfiguration) : null,
@@ -493,6 +496,7 @@ async function handleUpdatePackage(packageId: string, request: Request, env: Env
   if (body.advanceAmount !== undefined) { updates.push('advance_amount = ?'); params.push(body.advanceAmount); }
   if (body.boardingPoints !== undefined) { updates.push('boarding_points = ?'); params.push(JSON.stringify(body.boardingPoints)); }
   if (body.droppingPoints !== undefined) { updates.push('dropping_points = ?'); params.push(JSON.stringify(body.droppingPoints)); }
+  if (body.hosts !== undefined) { updates.push('hosts = ?'); params.push(JSON.stringify(body.hosts)); }
   if (body.inclusions !== undefined) { updates.push('inclusions = ?'); params.push(JSON.stringify(body.inclusions)); }
   if (body.exclusions !== undefined) { updates.push('exclusions = ?'); params.push(JSON.stringify(body.exclusions)); }
   if (body.mealPlan !== undefined) { updates.push('meal_plan = ?'); params.push(JSON.stringify(body.mealPlan)); }
@@ -551,7 +555,9 @@ async function handleGetBookings(request: Request, env: Env): Promise<Response> 
     agentId: b.agent_id, guestName: b.guest_name, guestPhone: b.guest_phone,
     guestEmail: b.guest_email, guestNid: b.guest_nid, emergencyContact: b.emergency_contact,
     passengers: JSON.parse(b.passengers), boardingPoint: b.boarding_point,
-    droppingPoint: b.dropping_point, totalAmount: b.total_amount, advancePaid: b.advance_paid,
+    droppingPoint: b.dropping_point, subtotal: b.subtotal || b.total_amount,
+    discountAmount: b.discount_amount || 0, discountReason: b.discount_reason,
+    totalAmount: b.total_amount, advancePaid: b.advance_paid,
     dueAmount: b.due_amount, paymentMethod: b.payment_method, paymentStatus: b.payment_status,
     status: b.status, source: b.source, notes: b.notes, createdAt: b.created_at,
   }));
@@ -573,6 +579,8 @@ async function handleGetBooking(bookingId: string, env: Env): Promise<Response> 
       guestPhone: booking.guest_phone, guestEmail: booking.guest_email, guestNid: booking.guest_nid,
       emergencyContact: booking.emergency_contact, passengers: JSON.parse(booking.passengers as string),
       boardingPoint: booking.boarding_point, droppingPoint: booking.dropping_point,
+      subtotal: (booking.subtotal as number) || (booking.total_amount as number),
+      discountAmount: (booking.discount_amount as number) || 0, discountReason: booking.discount_reason,
       totalAmount: booking.total_amount, advancePaid: booking.advance_paid, dueAmount: booking.due_amount,
       paymentMethod: booking.payment_method, paymentStatus: booking.payment_status,
       status: booking.status, source: booking.source, notes: booking.notes, createdAt: booking.created_at,
@@ -595,18 +603,22 @@ async function handleCreateBooking(request: Request, env: Env): Promise<Response
     'UPDATE counters SET current_value = ? WHERE agency_id = ? AND counter_type = ?'
   ).bind(newCounter, body.agencyId, 'booking').run();
 
+  // Calculate subtotal (before discount) - if not provided, use totalAmount + discountAmount
+  const subtotal = body.subtotal || (body.totalAmount + (body.discountAmount || 0));
+  const discountAmount = body.discountAmount || 0;
   const dueAmount = body.totalAmount - (body.advancePaid || 0);
   const paymentStatus = body.advancePaid >= body.totalAmount ? 'fully_paid' :
                         body.advancePaid > 0 ? 'advance_paid' : 'unpaid';
 
   await env.DB.prepare(`
-    INSERT INTO bookings (id, booking_id, package_id, agency_id, agent_id, guest_name, guest_phone, guest_email, guest_nid, emergency_contact, passengers, boarding_point, dropping_point, total_amount, advance_paid, due_amount, payment_method, payment_status, status, source, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bookings (id, booking_id, package_id, agency_id, agent_id, guest_name, guest_phone, guest_email, guest_nid, emergency_contact, passengers, boarding_point, dropping_point, subtotal, discount_amount, discount_reason, total_amount, advance_paid, due_amount, payment_method, payment_status, status, source, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, bookingId, body.packageId, body.agencyId, body.agentId || null,
     body.guestName, body.guestPhone, body.guestEmail || null, body.guestNid || null,
     body.emergencyContact || null, JSON.stringify(body.passengers), body.boardingPoint || null,
-    body.droppingPoint || null, body.totalAmount, body.advancePaid || 0, dueAmount,
+    body.droppingPoint || null, subtotal, discountAmount, body.discountReason || null,
+    body.totalAmount, body.advancePaid || 0, dueAmount,
     body.paymentMethod || null, paymentStatus, body.status || 'pending', body.source || 'web', body.notes || null
   ).run();
 
