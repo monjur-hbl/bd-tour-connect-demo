@@ -253,6 +253,7 @@ export interface WhatsAppAccount {
   connectedBy?: string;           // User ID who scanned QR
   agencyId: string;
   lastSeen?: string;
+  serverId?: number;              // Server instance ID (1 or 2)
 }
 
 export interface WhatsAppContact {

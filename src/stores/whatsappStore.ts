@@ -11,6 +11,11 @@ import {
 // WhatsApp notification sound
 const WHATSAPP_NOTIFICATION_SOUND = '/sounds/whatsapp-notification.mp3';
 
+interface ServerStatus {
+  status: WhatsAppConnectionStatus;
+  account: WhatsAppAccount | null;
+}
+
 interface WhatsAppStore {
   // State
   accounts: WhatsAppAccount[];
@@ -18,7 +23,11 @@ interface WhatsAppStore {
   messages: Record<string, WhatsAppMessage[]>;
   activeChat: string | null;
   activeAccount: string | null;
+  activeServer: number;
   qrCode: string | null;
+  serverQRCodes: Record<number, string | null>;
+  serverStatuses: Record<number, ServerStatus>;
+  serverChats: Record<number, WhatsAppChat[]>;
   searchQuery: string;
   notifications: WhatsAppNotification[];
   unreadTotal: number;
@@ -75,6 +84,13 @@ interface WhatsAppStore {
   setComposing: (composing: boolean) => void;
   reset: () => void;
 
+  // Server-specific actions
+  setActiveServer: (serverId: number) => void;
+  setActiveServerQR: (serverId: number, qrCode: string | null) => void;
+  setServerStatuses: (statuses: Record<number, ServerStatus>) => void;
+  setServerChats: (serverId: number, chats: WhatsAppChat[]) => void;
+  getServerName: (serverId: number) => string;
+
   // Computed
   getFilteredChats: () => WhatsAppChat[];
   getActiveChatMessages: () => WhatsAppMessage[];
@@ -87,7 +103,14 @@ const initialState = {
   messages: {},
   activeChat: null,
   activeAccount: null,
+  activeServer: 1,
   qrCode: null,
+  serverQRCodes: { 1: null, 2: null },
+  serverStatuses: {
+    1: { status: 'disconnected' as WhatsAppConnectionStatus, account: null },
+    2: { status: 'disconnected' as WhatsAppConnectionStatus, account: null },
+  },
+  serverChats: { 1: [], 2: [] },
   searchQuery: '',
   notifications: [],
   unreadTotal: 0,
@@ -315,6 +338,29 @@ export const useWhatsAppStore = create<WhatsAppStore>((set, get) => ({
   setComposing: (composing) => set({ isComposing: composing }),
 
   reset: () => set(initialState),
+
+  // Server-specific actions
+  setActiveServer: (serverId) => set({ activeServer: serverId }),
+
+  setActiveServerQR: (serverId, qrCode) => set((state) => ({
+    serverQRCodes: { ...state.serverQRCodes, [serverId]: qrCode },
+    qrCode: state.activeServer === serverId ? qrCode : state.qrCode,
+  })),
+
+  setServerStatuses: (statuses) => set({ serverStatuses: statuses }),
+
+  setServerChats: (serverId, chats) => set((state) => ({
+    serverChats: { ...state.serverChats, [serverId]: chats },
+  })),
+
+  getServerName: (serverId) => {
+    const state = get();
+    const serverStatus = state.serverStatuses[serverId];
+    if (serverStatus?.account?.name) {
+      return serverStatus.account.name;
+    }
+    return `WhatsApp ${serverId}`;
+  },
 
   // Computed getters
   getFilteredChats: () => {

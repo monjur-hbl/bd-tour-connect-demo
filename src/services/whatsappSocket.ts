@@ -2,116 +2,141 @@ import { io, Socket } from 'socket.io-client';
 import { useWhatsAppStore } from '../stores/whatsappStore';
 import {
   WhatsAppAccount,
-  WhatsAppChat,
-  WhatsAppMessage,
   WhatsAppConnectionStatus,
 } from '../types';
 
-// WhatsApp server URL - Google Cloud Run deployment
-const WHATSAPP_SERVER_URL = process.env.REACT_APP_WHATSAPP_SERVER_URL || 'https://bd-tour-whatsapp-1006186358018.us-central1.run.app';
+// Two separate WhatsApp server URLs
+const WHATSAPP_SERVER_1_URL = process.env.REACT_APP_WHATSAPP_SERVER_1_URL || 'https://bd-tour-whatsapp-1-1006186358018.us-central1.run.app';
+const WHATSAPP_SERVER_2_URL = process.env.REACT_APP_WHATSAPP_SERVER_2_URL || 'https://bd-tour-whatsapp-2-1006186358018.us-central1.run.app';
+
+interface ServerConnection {
+  socket: Socket | null;
+  serverId: number;
+  serverUrl: string;
+  status: WhatsAppConnectionStatus;
+  account: WhatsAppAccount | null;
+  qrCode: string | null;
+}
 
 class WhatsAppSocketService {
-  private socket: Socket | null = null;
+  private servers: Map<number, ServerConnection> = new Map();
   private agencyId: string | null = null;
-  private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
 
+  constructor() {
+    // Initialize both server connections
+    this.servers.set(1, {
+      socket: null,
+      serverId: 1,
+      serverUrl: WHATSAPP_SERVER_1_URL,
+      status: 'disconnected',
+      account: null,
+      qrCode: null,
+    });
+    this.servers.set(2, {
+      socket: null,
+      serverId: 2,
+      serverUrl: WHATSAPP_SERVER_2_URL,
+      status: 'disconnected',
+      account: null,
+      qrCode: null,
+    });
+  }
+
   connect(agencyId: string) {
-    if (this.socket?.connected && this.agencyId === agencyId) {
+    this.agencyId = agencyId;
+
+    // Connect to both servers
+    this.servers.forEach((server, serverId) => {
+      this.connectToServer(serverId, agencyId);
+    });
+  }
+
+  private connectToServer(serverId: number, agencyId: string) {
+    const server = this.servers.get(serverId);
+    if (!server) return;
+
+    if (server.socket?.connected) {
       return;
     }
 
-    this.agencyId = agencyId;
-    this.disconnect();
+    // Disconnect existing socket
+    if (server.socket) {
+      server.socket.disconnect();
+    }
 
-    console.log('Connecting to WhatsApp server:', WHATSAPP_SERVER_URL);
+    console.log(`Connecting to WhatsApp Server ${serverId}:`, server.serverUrl);
 
-    this.socket = io(WHATSAPP_SERVER_URL, {
+    const socket = io(server.serverUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: this.maxReconnectAttempts,
       reconnectionDelay: 1000,
     });
 
-    this.setupEventListeners();
+    server.socket = socket;
 
-    // Join agency room
-    this.socket.on('connect', () => {
-      console.log('Connected to WhatsApp server');
-      this.reconnectAttempts = 0;
-      this.socket?.emit('join', { agencyId });
-    });
-
-    this.socket.on('disconnect', (reason) => {
-      console.log('Disconnected from WhatsApp server:', reason);
-    });
-
-    this.socket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
-      this.reconnectAttempts++;
-
-      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        useWhatsAppStore.getState().setError('Unable to connect to WhatsApp server. Please try again later.');
-      }
-    });
+    this.setupServerListeners(serverId, socket, agencyId);
   }
 
-  private setupEventListeners() {
-    if (!this.socket) return;
+  private setupServerListeners(serverId: number, socket: Socket, agencyId: string) {
+    const server = this.servers.get(serverId);
+    if (!server) return;
 
-    const store = useWhatsAppStore.getState();
+    socket.on('connect', () => {
+      console.log(`Connected to WhatsApp Server ${serverId}`);
+      socket.emit('join', { agencyId });
+    });
 
-    // Account status update
-    this.socket.on('whatsapp:status', ({ slot, status, account }) => {
-      console.log('Status update:', slot, status);
+    socket.on('disconnect', (reason) => {
+      console.log(`Disconnected from WhatsApp Server ${serverId}:`, reason);
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error(`Connection error on Server ${serverId}:`, error);
+    });
+
+    // Status update
+    socket.on('whatsapp:status', ({ status, account }) => {
+      console.log(`Server ${serverId} status:`, status);
+      server.status = status;
       if (account) {
-        const existingAccounts = useWhatsAppStore.getState().accounts;
-        const existingIndex = existingAccounts.findIndex(a => a.id === account.id);
-
-        if (existingIndex >= 0) {
-          const updated = [...existingAccounts];
-          updated[existingIndex] = { ...updated[existingIndex], status, ...account };
-          useWhatsAppStore.getState().setAccounts(updated);
-        } else {
-          useWhatsAppStore.getState().addAccount({
-            ...account,
-            status,
-            agencyId: this.agencyId!,
-          });
-        }
+        server.account = {
+          ...account,
+          id: `server_${serverId}`,
+          agencyId: this.agencyId!,
+          status,
+          serverId,
+        };
       }
+      this.updateStore();
     });
 
     // QR Code received
-    this.socket.on('whatsapp:qr', ({ slot, qrCode }) => {
-      console.log('QR code received for slot:', slot);
-      useWhatsAppStore.getState().setQrCode(qrCode);
+    socket.on('whatsapp:qr', ({ qrCode }) => {
+      console.log(`QR code received from Server ${serverId}`);
+      server.qrCode = qrCode;
+      server.status = 'connecting';
+      useWhatsAppStore.getState().setActiveServerQR(serverId, qrCode);
+      this.updateStore();
     });
 
     // Connected successfully
-    this.socket.on('whatsapp:connected', ({ slot, account }) => {
-      console.log('WhatsApp connected:', account);
-      useWhatsAppStore.getState().setQrCode(null);
-
-      const fullAccount: WhatsAppAccount = {
-        id: account.id,
+    socket.on('whatsapp:connected', ({ account }) => {
+      console.log(`WhatsApp connected on Server ${serverId}:`, account);
+      server.status = 'connected';
+      server.qrCode = null;
+      server.account = {
+        id: `server_${serverId}`,
         phoneNumber: account.phoneNumber,
         name: account.name,
         status: 'connected',
         connectedAt: new Date().toISOString(),
         agencyId: this.agencyId!,
+        serverId,
       };
-
-      const existingAccounts = useWhatsAppStore.getState().accounts;
-      const existingIndex = existingAccounts.findIndex(a => a.id === account.id);
-
-      if (existingIndex >= 0) {
-        const updated = [...existingAccounts];
-        updated[existingIndex] = fullAccount;
-        useWhatsAppStore.getState().setAccounts(updated);
-      } else {
-        useWhatsAppStore.getState().addAccount(fullAccount);
-      }
+      useWhatsAppStore.getState().setActiveServerQR(serverId, null);
+      this.updateStore();
 
       // Play success sound
       try {
@@ -122,78 +147,48 @@ class WhatsAppSocketService {
     });
 
     // Disconnected
-    this.socket.on('whatsapp:disconnected', ({ slot, reason }) => {
-      console.log('WhatsApp disconnected:', reason);
-      const accounts = useWhatsAppStore.getState().accounts;
-      const updated = accounts.map(acc => {
-        if (acc.id.endsWith(`_${slot}`)) {
-          return { ...acc, status: 'disconnected' as WhatsAppConnectionStatus };
-        }
-        return acc;
-      });
-      useWhatsAppStore.getState().setAccounts(updated);
+    socket.on('whatsapp:disconnected', ({ reason }) => {
+      console.log(`WhatsApp disconnected on Server ${serverId}:`, reason);
+      server.status = 'disconnected';
+      server.account = null;
+      server.qrCode = null;
+      this.updateStore();
     });
 
-    // Auth failure
-    this.socket.on('whatsapp:auth_failure', ({ slot, message }) => {
-      console.error('Auth failure:', message);
-      useWhatsAppStore.getState().setError('WhatsApp authentication failed. Please try again.');
-      useWhatsAppStore.getState().setQrCode(null);
-    });
-
-    // Chats received
-    this.socket.on('whatsapp:chats', ({ slot, chats }) => {
-      console.log('Received chats:', chats.length);
-      useWhatsAppStore.getState().setChats(chats);
-    });
-
-    // Messages received
-    this.socket.on('whatsapp:messages', ({ slot, chatId, messages }) => {
-      console.log('Received messages for chat:', chatId, messages.length);
-      useWhatsAppStore.getState().setMessages(chatId, messages);
-    });
-
-    // New message received
-    this.socket.on('whatsapp:message', ({ slot, message, chat }) => {
-      console.log('New message:', message?.body?.substring(0, 50));
-
+    // New message
+    socket.on('whatsapp:message', ({ message }) => {
+      console.log(`Message from Server ${serverId}:`, message?.body?.substring(0, 50));
       if (message) {
-        useWhatsAppStore.getState().addMessage(message.chatId, message);
-      }
-
-      if (chat) {
-        useWhatsAppStore.getState().updateChat(chat.id, chat);
+        useWhatsAppStore.getState().addMessage(message.chatId, {
+          ...message,
+          serverId,
+        });
       }
     });
 
-    // Message sent confirmation
-    this.socket.on('whatsapp:message_sent', ({ slot, chatId, message }) => {
-      console.log('Message sent:', message.id);
-      useWhatsAppStore.getState().addMessage(chatId, message);
-    });
-
-    // Message status update
-    this.socket.on('whatsapp:message_status', ({ slot, messageId, chatId, status }) => {
-      useWhatsAppStore.getState().updateMessage(chatId, messageId, { status });
+    // Message sent
+    socket.on('whatsapp:message_sent', ({ chatId, message }) => {
+      console.log(`Message sent on Server ${serverId}`);
+      useWhatsAppStore.getState().addMessage(chatId, {
+        ...message,
+        serverId,
+      });
     });
 
     // Notification
-    this.socket.on('whatsapp:notification', ({ slot, chatId, message, contact }) => {
-      const state = useWhatsAppStore.getState();
-
-      // Add notification
-      state.addNotification({
+    socket.on('whatsapp:notification', ({ chatId, message, contact }) => {
+      useWhatsAppStore.getState().addNotification({
         id: `notif-${Date.now()}`,
         chatId,
-        message,
-        accountId: message.accountId,
+        message: { ...message, serverId },
+        accountId: `server_${serverId}`,
         isRead: false,
         createdAt: new Date().toISOString(),
       });
 
-      // Show browser notification if supported
+      // Browser notification
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(`${contact.name}`, {
+        new Notification(`${contact.name} (WhatsApp ${serverId})`, {
           body: message.body || 'New message',
           icon: '/logo192.png',
           tag: chatId,
@@ -201,56 +196,65 @@ class WhatsAppSocketService {
       }
     });
 
-    // Reply tracking
-    this.socket.on('whatsapp:reply_started', ({ chatId, userId, userName }) => {
-      useWhatsAppStore.getState().updateChat(chatId, {
-        activeReplyBy: userId,
-        activeReplyByName: userName,
-        activeReplyAt: new Date().toISOString(),
-      });
+    // Chats received
+    socket.on('whatsapp:chats', ({ chats }) => {
+      console.log(`Received ${chats.length} chats from Server ${serverId}`);
+      useWhatsAppStore.getState().setServerChats(serverId, chats);
     });
 
-    this.socket.on('whatsapp:reply_cleared', ({ chatId }) => {
-      useWhatsAppStore.getState().updateChat(chatId, {
-        activeReplyBy: undefined,
-        activeReplyByName: undefined,
-        activeReplyAt: undefined,
-      });
-    });
-
-    // Error handling
-    this.socket.on('whatsapp:error', ({ error }) => {
-      console.error('WhatsApp error:', error);
-      useWhatsAppStore.getState().setError(error);
+    // Error
+    socket.on('whatsapp:error', ({ error }) => {
+      console.error(`Error on Server ${serverId}:`, error);
+      useWhatsAppStore.getState().setError(`Server ${serverId}: ${error}`);
     });
   }
 
-  // Request QR code to connect a new WhatsApp account
-  requestQR(slot: number) {
-    if (!this.socket || !this.agencyId) {
-      console.error('Socket not connected');
+  private updateStore() {
+    const accounts: WhatsAppAccount[] = [];
+    this.servers.forEach((server) => {
+      if (server.account) {
+        accounts.push(server.account);
+      }
+    });
+    useWhatsAppStore.getState().setAccounts(accounts);
+
+    // Update server statuses
+    const serverStatuses: Record<number, { status: WhatsAppConnectionStatus; account: WhatsAppAccount | null }> = {};
+    this.servers.forEach((server, id) => {
+      serverStatuses[id] = {
+        status: server.status,
+        account: server.account,
+      };
+    });
+    useWhatsAppStore.getState().setServerStatuses(serverStatuses);
+  }
+
+  // Request QR code for a specific server
+  requestQR(serverId: number) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) {
+      console.error(`Server ${serverId} socket not connected`);
       return;
     }
 
-    console.log('Requesting QR for slot:', slot);
-    this.socket.emit('whatsapp:connect', {
+    console.log(`Requesting QR for Server ${serverId}`);
+    server.socket.emit('whatsapp:connect', {
       agencyId: this.agencyId,
-      slot,
     });
   }
 
-  // Disconnect WhatsApp account
-  disconnectAccount(slot: number) {
-    if (!this.socket || !this.agencyId) return;
+  // Disconnect WhatsApp account on a specific server
+  disconnectAccount(serverId: number) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) return;
 
-    this.socket.emit('whatsapp:disconnect', {
+    server.socket.emit('whatsapp:disconnect', {
       agencyId: this.agencyId,
-      slot,
     });
   }
 
-  // Send message
-  sendMessage(slot: number, chatId: string, message: {
+  // Send message via specific server
+  sendMessage(serverId: number, chatId: string, message: {
     type: string;
     body?: string;
     mediaData?: string;
@@ -258,73 +262,61 @@ class WhatsAppSocketService {
     mediaFileName?: string;
     caption?: string;
   }) {
-    if (!this.socket || !this.agencyId) return;
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) return;
 
-    this.socket.emit('whatsapp:send', {
+    server.socket.emit('whatsapp:send', {
       agencyId: this.agencyId,
-      slot,
       chatId,
       message,
     });
   }
 
-  // Fetch messages for a chat
-  fetchMessages(slot: number, chatId: string, limit = 50) {
-    if (!this.socket || !this.agencyId) return;
+  // Fetch chats for a specific server
+  fetchChats(serverId: number) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) return;
 
-    this.socket.emit('whatsapp:fetch_messages', {
+    server.socket.emit('whatsapp:fetch_chats', {
       agencyId: this.agencyId,
-      slot,
-      chatId,
-      limit,
     });
   }
 
-  // Fetch all chats
-  fetchChats(slot: number) {
-    if (!this.socket || !this.agencyId) return;
-
-    this.socket.emit('whatsapp:fetch_chats', {
-      agencyId: this.agencyId,
-      slot,
-    });
+  // Get server status
+  getServerStatus(serverId: number): WhatsAppConnectionStatus {
+    return this.servers.get(serverId)?.status || 'disconnected';
   }
 
-  // Start replying indicator
-  startReplying(chatId: string, userId: string, userName: string) {
-    if (!this.socket || !this.agencyId) return;
-
-    this.socket.emit('whatsapp:start_reply', {
-      agencyId: this.agencyId,
-      chatId,
-      userId,
-      userName,
-    });
+  // Get server account
+  getServerAccount(serverId: number): WhatsAppAccount | null {
+    return this.servers.get(serverId)?.account || null;
   }
 
-  // Stop replying indicator
-  stopReplying(chatId: string, userId: string) {
-    if (!this.socket || !this.agencyId) return;
-
-    this.socket.emit('whatsapp:stop_reply', {
-      agencyId: this.agencyId,
-      chatId,
-      userId,
-    });
+  // Get server QR code
+  getServerQR(serverId: number): string | null {
+    return this.servers.get(serverId)?.qrCode || null;
   }
 
-  // Disconnect socket
+  // Disconnect all
   disconnect() {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    this.servers.forEach((server) => {
+      if (server.socket) {
+        server.socket.disconnect();
+        server.socket = null;
+      }
+    });
     this.agencyId = null;
   }
 
-  // Check if connected
-  isConnected(): boolean {
-    return this.socket?.connected || false;
+  // Check if any server is connected
+  isAnyConnected(): boolean {
+    let connected = false;
+    this.servers.forEach((server) => {
+      if (server.socket?.connected) {
+        connected = true;
+      }
+    });
+    return connected;
   }
 }
 
