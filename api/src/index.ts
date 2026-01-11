@@ -375,6 +375,8 @@ async function handleGetPackages(request: Request, env: Env): Promise<Response> 
     inclusions: p.inclusions ? JSON.parse(p.inclusions) : [],
     exclusions: p.exclusions ? JSON.parse(p.exclusions) : [],
     mealPlan: p.meal_plan ? JSON.parse(p.meal_plan) : [],
+    busConfiguration: p.bus_configuration ? JSON.parse(p.bus_configuration) : null,
+    seatLayout: p.seat_layout ? JSON.parse(p.seat_layout) : null,
     status: p.status,
     createdAt: p.created_at,
   }));
@@ -414,6 +416,8 @@ async function handleGetPackage(packageId: string, env: Env): Promise<Response> 
       inclusions: pkg.inclusions ? JSON.parse(pkg.inclusions as string) : [],
       exclusions: pkg.exclusions ? JSON.parse(pkg.exclusions as string) : [],
       mealPlan: pkg.meal_plan ? JSON.parse(pkg.meal_plan as string) : [],
+      busConfiguration: pkg.bus_configuration ? JSON.parse(pkg.bus_configuration as string) : null,
+      seatLayout: pkg.seat_layout ? JSON.parse(pkg.seat_layout as string) : null,
       status: pkg.status,
       createdAt: pkg.created_at,
     },
@@ -425,8 +429,8 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
   const id = `pkg-${Date.now()}`;
 
   await env.DB.prepare(`
-    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, inclusions, exclusions, meal_plan, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO packages (id, agency_id, title, title_bn, destination, destination_bn, description, description_bn, departure_date, return_date, departure_time, vehicle_type, total_seats, available_seats, price_per_person, couple_price, child_price, advance_amount, boarding_points, dropping_points, inclusions, exclusions, meal_plan, bus_configuration, seat_layout, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     body.agencyId,
@@ -451,6 +455,8 @@ async function handleCreatePackage(request: Request, env: Env): Promise<Response
     JSON.stringify(body.inclusions || []),
     JSON.stringify(body.exclusions || []),
     JSON.stringify(body.mealPlan || []),
+    body.busConfiguration ? JSON.stringify(body.busConfiguration) : null,
+    body.seatLayout ? JSON.stringify(body.seatLayout) : null,
     body.status || 'draft'
   ).run();
 
@@ -478,6 +484,8 @@ async function handleUpdatePackage(packageId: string, request: Request, env: Env
       couple_price = COALESCE(?, couple_price),
       child_price = COALESCE(?, child_price),
       advance_amount = COALESCE(?, advance_amount),
+      bus_configuration = COALESCE(?, bus_configuration),
+      seat_layout = COALESCE(?, seat_layout),
       status = COALESCE(?, status),
       updated_at = datetime('now')
     WHERE id = ?
@@ -498,6 +506,8 @@ async function handleUpdatePackage(packageId: string, request: Request, env: Env
     body.couplePrice || null,
     body.childPrice || null,
     body.advanceAmount || null,
+    body.busConfiguration ? JSON.stringify(body.busConfiguration) : null,
+    body.seatLayout ? JSON.stringify(body.seatLayout) : null,
     body.status || null,
     packageId
   ).run();

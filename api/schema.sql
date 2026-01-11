@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS packages (
   inclusions TEXT, -- JSON array
   exclusions TEXT, -- JSON array
   meal_plan TEXT, -- JSON array
+  bus_configuration TEXT, -- JSON object for bus layout config
+  seat_layout TEXT, -- JSON object for seat positions and states
   status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'current', 'future', 'past', 'cancelled')),
   cover_image TEXT,
   created_at TEXT DEFAULT (datetime('now')),
