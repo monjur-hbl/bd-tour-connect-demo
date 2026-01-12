@@ -24,6 +24,7 @@ import { MyBookings } from './pages/agent/MyBookings';
 import { NewBooking } from './pages/agent/NewBooking';
 import { ProfileSettings } from './pages/settings/ProfileSettings';
 import { WhatsAppPage } from './pages/whatsapp/WhatsAppPage';
+import { MessagingPage } from './pages/messaging';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{
@@ -96,6 +97,7 @@ const App: React.FC = () => {
           <Route path="new-booking" element={<AgencyNewBooking />} />
           <Route path="agents" element={<AgentManagement />} />
           <Route path="whatsapp" element={<WhatsAppPage />} />
+          <Route path="messaging" element={<MessagingPage />} />
           <Route path="settings" element={<AgencySettings />} />
           <Route path="profile" element={<ProfileSettings />} />
         </Route>
@@ -114,6 +116,7 @@ const App: React.FC = () => {
           <Route path="bookings" element={<MyBookings />} />
           <Route path="new-booking" element={<NewBooking />} />
           <Route path="whatsapp" element={<WhatsAppPage />} />
+          <Route path="messaging" element={<MessagingPage />} />
           <Route path="profile" element={<ProfileSettings />} />
         </Route>
 

@@ -341,3 +341,138 @@ export interface WhatsAppState {
   isLoading: boolean;
   error: string | null;
 }
+
+// ============================================
+// FACEBOOK INTEGRATION TYPES
+// ============================================
+
+export type FacebookConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type FacebookMessageType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'sticker' | 'location';
+export type FacebookMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
+// Facebook Messenger Types
+export interface FacebookMessengerAccount {
+  id: string;
+  userId: string;                 // Facebook User ID
+  name: string;
+  profilePicture?: string;
+  accessToken: string;            // Long-lived access token
+  status: FacebookConnectionStatus;
+  connectedAt?: string;
+  connectedBy?: string;           // User ID who connected
+  agencyId: string;
+  lastSeen?: string;
+}
+
+export interface FacebookMessengerContact {
+  id: string;                     // PSID (Page-Scoped ID) or ASID
+  name: string;
+  profilePicture?: string;
+  email?: string;
+  locale?: string;
+  timezone?: number;
+  lastMessageAt?: string;
+}
+
+export interface FacebookMessengerMessage {
+  id: string;
+  accountId: string;              // Which Messenger account
+  conversationId: string;         // Thread ID
+  senderId: string;
+  recipientId: string;
+  fromMe: boolean;
+  type: FacebookMessageType;
+  body: string;
+  attachmentUrl?: string;
+  attachmentType?: string;
+  timestamp: string;
+  status: FacebookMessageStatus;
+  isEcho?: boolean;               // Echoed message from page
+  quickReplies?: Array<{
+    content_type: string;
+    title: string;
+    payload: string;
+  }>;
+}
+
+export interface FacebookMessengerConversation {
+  id: string;
+  accountId: string;
+  contact: FacebookMessengerContact;
+  lastMessage?: FacebookMessengerMessage;
+  unreadCount: number;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+// Facebook Page Types
+export interface FacebookPage {
+  id: string;
+  pageId: string;                 // Facebook Page ID
+  name: string;
+  category?: string;
+  profilePicture?: string;
+  coverPhoto?: string;
+  accessToken: string;            // Page access token
+  status: FacebookConnectionStatus;
+  connectedAt?: string;
+  connectedBy?: string;
+  agencyId: string;
+  followers?: number;
+  likes?: number;
+}
+
+export interface FacebookPageMessage {
+  id: string;
+  pageId: string;                 // Which page
+  conversationId: string;
+  senderId: string;
+  senderName?: string;
+  senderProfilePic?: string;
+  recipientId: string;
+  fromPage: boolean;              // true if sent by page
+  type: FacebookMessageType;
+  body: string;
+  attachmentUrl?: string;
+  attachmentType?: string;
+  timestamp: string;
+  status: FacebookMessageStatus;
+}
+
+export interface FacebookPageConversation {
+  id: string;
+  pageId: string;
+  participantId: string;          // User who messaged the page
+  participantName: string;
+  participantProfilePic?: string;
+  lastMessage?: FacebookPageMessage;
+  unreadCount: number;
+  isActive: boolean;
+  snippet?: string;               // Preview of last message
+  updatedAt: string;
+}
+
+// Unified Messaging Types
+export type MessagingPlatform = 'whatsapp' | 'messenger' | 'facebook_page';
+
+export interface UnifiedConversation {
+  id: string;
+  platform: MessagingPlatform;
+  accountId: string;              // Platform-specific account ID
+  contact: {
+    id: string;
+    name: string;
+    phoneNumber?: string;
+    profilePicture?: string;
+    email?: string;
+  };
+  lastMessage?: {
+    body: string;
+    timestamp: string;
+    fromMe: boolean;
+  };
+  unreadCount: number;
+  isPinned: boolean;
+  isMuted: boolean;
+  isArchived: boolean;
+}
