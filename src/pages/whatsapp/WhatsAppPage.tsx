@@ -50,23 +50,28 @@ export const WhatsAppPage: React.FC = () => {
   };
 
   // Poll server status via REST API (miami-style)
-  const pollServerStatus = useCallback(async (serverId: number) => {
+  const pollServerStatus = useCallback(async (serverId: number, showToast: boolean = false) => {
     if (!user?.agencyId) return;
 
     try {
       const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}`);
       const data = await response.json();
 
+      // Get current status to check if this is a new connection
+      const currentStatus = useWhatsAppStore.getState().serverStatuses[serverId];
+      const wasNotConnected = currentStatus?.status !== 'connected';
+
       // Update store with status from REST API
-      if (data.status === 'connected' && data.connectedAs) {
+      // Server returns 'account' field (not 'connectedAs')
+      if (data.status === 'connected' && data.account) {
         useWhatsAppStore.getState().setServerStatuses({
-          ...serverStatuses,
+          ...useWhatsAppStore.getState().serverStatuses,
           [serverId]: {
             status: 'connected',
             account: {
-              id: data.connectedAs.id,
-              phoneNumber: data.connectedAs.phoneNumber,
-              name: data.connectedAs.name,
+              id: data.account.id,
+              phoneNumber: data.account.phoneNumber,
+              name: data.account.name,
               status: 'connected',
               agencyId: user.agencyId,
               serverId: serverId,
@@ -79,12 +84,16 @@ export const WhatsAppPage: React.FC = () => {
           pollingRef.current[serverId] = null;
         }
         toast.dismiss(`qr-loading-${serverId}`);
-        toast.success(`WhatsApp ${serverId} connected!`);
+        // Only show toast if this is a new connection (not on page refresh)
+        if (showToast && wasNotConnected) {
+          toast.success(`WhatsApp ${serverId} connected!`);
+        }
         setIsConnecting((prev) => ({ ...prev, [serverId]: false }));
+        // Note: chats are auto-fetched via socket events (whatsapp:connected, whatsapp:sync_complete)
       } else if (data.status === 'qr_ready' && data.qrCode) {
         useWhatsAppStore.getState().setActiveServerQR(serverId, data.qrCode);
         useWhatsAppStore.getState().setServerStatuses({
-          ...serverStatuses,
+          ...useWhatsAppStore.getState().serverStatuses,
           [serverId]: {
             status: 'qr_ready',
             account: null,
@@ -93,7 +102,7 @@ export const WhatsAppPage: React.FC = () => {
         toast.dismiss(`qr-loading-${serverId}`);
       } else if (data.status === 'connecting') {
         useWhatsAppStore.getState().setServerStatuses({
-          ...serverStatuses,
+          ...useWhatsAppStore.getState().serverStatuses,
           [serverId]: {
             status: 'connecting',
             account: null,
@@ -103,13 +112,17 @@ export const WhatsAppPage: React.FC = () => {
     } catch (err) {
       console.error(`Error polling server ${serverId}:`, err);
     }
-  }, [user?.agencyId, serverStatuses]);
+  }, [user?.agencyId]);
 
   // Connect to WhatsApp servers on mount
   useEffect(() => {
     if (user?.agencyId) {
       console.log('Connecting to WhatsApp servers for agency:', user.agencyId);
       whatsappSocket.connect(user.agencyId);
+
+      // Check initial status of both servers on page load
+      pollServerStatus(1);
+      pollServerStatus(2);
 
       // Request notification permission
       if ('Notification' in window && Notification.permission === 'default') {
@@ -123,7 +136,7 @@ export const WhatsAppPage: React.FC = () => {
         if (interval) clearInterval(interval);
       });
     };
-  }, [user?.agencyId]);
+  }, [user?.agencyId, pollServerStatus]);
 
   // Clear error after 5 seconds
   useEffect(() => {
@@ -205,11 +218,11 @@ export const WhatsAppPage: React.FC = () => {
       }
 
       pollingRef.current[serverId] = setInterval(() => {
-        pollServerStatus(serverId);
+        pollServerStatus(serverId, true);
       }, 2000);
 
       // Also poll immediately
-      pollServerStatus(serverId);
+      pollServerStatus(serverId, true);
 
       // Also trigger socket connection for message events
       whatsappSocket.requestQR(serverId);
@@ -248,11 +261,11 @@ export const WhatsAppPage: React.FC = () => {
     if (!user?.agencyId) return;
 
     try {
-      // Call REST API to disconnect
-      await fetch(`${getServerUrl(serverId)}/logout`, {
+      // Call REST API to disconnect (endpoint is /disconnect, not /logout)
+      await fetch(`${getServerUrl(serverId)}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agencyId: user.agencyId }),
+        body: JSON.stringify({ agencyId: user.agencyId, slot: serverId }),
       });
 
       // Also disconnect via socket

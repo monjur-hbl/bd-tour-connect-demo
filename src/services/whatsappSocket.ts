@@ -89,8 +89,9 @@ class WhatsAppSocketService {
       this.updateStore();
     });
 
-    // WhatsApp status event
-    socket.on('whatsapp:status', ({ serverId: sid, status, account }) => {
+    // WhatsApp status event - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:status', ({ slot, status, account }) => {
+      const sid = slot || serverId;
       console.log(`Server ${sid} status:`, status);
       server.status = status as WhatsAppConnectionStatus;
       if (account) {
@@ -106,8 +107,9 @@ class WhatsAppSocketService {
       this.updateStore();
     });
 
-    // QR Code received
-    socket.on('whatsapp:qr', ({ serverId: sid, qrCode }) => {
+    // QR Code received - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:qr', ({ slot, qrCode }) => {
+      const sid = slot || serverId;
       console.log(`QR code received from Server ${sid}`);
       server.qrCode = qrCode;
       server.status = 'qr_ready' as WhatsAppConnectionStatus;
@@ -115,8 +117,9 @@ class WhatsAppSocketService {
       this.updateStore();
     });
 
-    // Connected successfully
-    socket.on('whatsapp:connected', ({ serverId: sid, account }) => {
+    // Connected successfully - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:connected', ({ slot, account }) => {
+      const sid = slot || serverId;
       console.log(`WhatsApp connected on Server ${sid}:`, account);
       server.status = 'connected';
       server.qrCode = null;
@@ -131,10 +134,17 @@ class WhatsAppSocketService {
       };
       useWhatsAppStore.getState().setActiveServerQR(sid, null);
       this.updateStore();
+
+      // Fetch chats automatically after connection
+      console.log(`Auto-fetching chats for server ${sid} after connection`);
+      setTimeout(() => {
+        this.fetchChats(sid);
+      }, 1000);
     });
 
-    // Disconnected
-    socket.on('whatsapp:disconnected', ({ serverId: sid, reason }) => {
+    // Disconnected - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:disconnected', ({ slot, reason }) => {
+      const sid = slot || serverId;
       console.log(`WhatsApp disconnected on Server ${sid}:`, reason);
       server.status = 'disconnected';
       server.qrCode = null;
@@ -143,14 +153,16 @@ class WhatsAppSocketService {
       this.updateStore();
     });
 
-    // Error
-    socket.on('whatsapp:error', ({ serverId: sid, error }) => {
+    // Error - server sends 'slot' for some errors
+    socket.on('whatsapp:error', ({ slot, error }) => {
+      const sid = slot || serverId;
       console.error(`Server ${sid} error:`, error);
       useWhatsAppStore.getState().setError(error);
     });
 
-    // Message received
-    socket.on('whatsapp:message', ({ serverId: sid, message }) => {
+    // Message received - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:message', ({ slot, message }) => {
+      const sid = slot || serverId;
       console.log(`Message from Server ${sid}:`, message);
       useWhatsAppStore.getState().addMessage(message.chatId, {
         ...message,
@@ -158,8 +170,9 @@ class WhatsAppSocketService {
       });
     });
 
-    // Message sent confirmation
-    socket.on('whatsapp:message_sent', ({ serverId: sid, chatId, message }) => {
+    // Message sent confirmation - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:message_sent', ({ slot, chatId, message }) => {
+      const sid = slot || serverId;
       console.log(`Message sent on Server ${sid}:`, chatId);
       useWhatsAppStore.getState().addMessage(chatId, {
         ...message,
@@ -167,8 +180,9 @@ class WhatsAppSocketService {
       });
     });
 
-    // Notification
-    socket.on('whatsapp:notification', ({ serverId: sid, chatId, message, contact }) => {
+    // Notification - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:notification', ({ slot, chatId, message, contact }) => {
+      const sid = slot || serverId;
       useWhatsAppStore.getState().addNotification({
         id: message.id,
         accountId: `server_${sid}`,
@@ -182,10 +196,38 @@ class WhatsAppSocketService {
       });
     });
 
-    // Chats received
-    socket.on('whatsapp:chats', ({ serverId: sid, chats }) => {
-      console.log(`Chats from Server ${sid}:`, chats.length);
-      useWhatsAppStore.getState().setServerChats(sid, chats);
+    // Chats received - server sends 'slot' not 'serverId'
+    socket.on('whatsapp:chats', ({ slot, chats }) => {
+      const sid = slot || serverId;
+      console.log(`Chats received from Server ${sid}:`, chats?.length || 0);
+      if (chats && chats.length > 0) {
+        useWhatsAppStore.getState().setServerChats(sid, chats);
+      }
+    });
+
+    // Sync events from server
+    socket.on('whatsapp:contacts_synced', ({ slot, count }) => {
+      console.log(`Server ${slot || serverId}: ${count} contacts synced`);
+    });
+
+    socket.on('whatsapp:chats_synced', ({ slot, count }) => {
+      console.log(`Server ${slot || serverId}: ${count} chats synced`);
+      // Trigger fetch chats once sync is complete
+      const sid = slot || serverId;
+      setTimeout(() => {
+        this.fetchChats(sid);
+      }, 500);
+    });
+
+    socket.on('whatsapp:sync_complete', ({ slot, contactsCount, chatsCount }) => {
+      console.log(`Server ${slot || serverId}: Sync complete - ${contactsCount} contacts, ${chatsCount} chats`);
+      // Trigger fetch chats once sync is complete
+      const sid = slot || serverId;
+      this.fetchChats(sid);
+    });
+
+    socket.on('whatsapp:syncing', ({ slot, message }) => {
+      console.log(`Server ${slot || serverId}: ${message}`);
     });
   }
 
@@ -224,7 +266,7 @@ class WhatsAppSocketService {
     }
 
     console.log(`Disconnecting WhatsApp from Server ${serverId}`);
-    server.socket.emit('whatsapp:disconnect', { agencyId: this.agencyId });
+    server.socket.emit('whatsapp:disconnect', { agencyId: this.agencyId, slot: serverId });
   }
 
   // Send message
@@ -235,8 +277,10 @@ class WhatsAppSocketService {
       return;
     }
 
+    console.log(`Sending message to ${chatId} via server ${serverId}`);
     server.socket.emit('whatsapp:send', {
       agencyId: this.agencyId,
+      slot: serverId,  // Server expects 'slot' parameter
       chatId,
       message,
     });
@@ -250,7 +294,9 @@ class WhatsAppSocketService {
       return;
     }
 
-    server.socket.emit('whatsapp:fetch_chats', { agencyId: this.agencyId });
+    // Server expects slot parameter (slot 1 for server 1, etc.)
+    console.log(`Fetching chats for server ${serverId}, agency ${this.agencyId}`);
+    server.socket.emit('whatsapp:fetch_chats', { agencyId: this.agencyId, slot: serverId });
   }
 
   // Get server status

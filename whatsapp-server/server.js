@@ -6,6 +6,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   delay,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers
 } from '@whiskeysockets/baileys';
@@ -15,8 +16,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
 
-// NOTE: Removed fetchLatestBaileysVersion - it causes version mismatch issues
-// WhatsApp may reject sessions when version changes between connections
+// Version 2.4.0 - Fixed slot parameter, auto-fetch chats on sync complete
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,34 +156,32 @@ async function createSession(agencyId, slot) {
   sessions.set(clientId, session);
 
   try {
-    // Don't fetch latest version - use Baileys built-in version for stability
-    // This prevents WhatsApp from rejecting sessions due to version mismatch
-    console.log(`[${clientId}] Using Baileys built-in version for stability`);
+    // Fetch latest version exactly like miami implementation
+    const { version } = await fetchLatestBaileysVersion();
+    console.log(`[${clientId}] Baileys version: ${version.join('.')}`);
 
     const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     const sock = makeWASocket({
-      // Don't pass version - let Baileys use its built-in stable version
+      version,
       logger,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      // Use stable browser fingerprint - ubuntu/Chrome is most reliable
+      // Use ubuntu browser - works better with WhatsApp Web (miami config)
       browser: Browsers.ubuntu('Chrome'),
-      // Don't sync full history to avoid timeouts on large accounts
+      // Connection settings from working miami implementation
+      connectTimeoutMs: 120000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 500,
+      emitOwnEvents: true,
       syncFullHistory: false,
-      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: true,
       getMessage: async () => undefined,
-      // Keep phone notifications working
-      markOnlineOnConnect: false,
-      // Connection settings for stability
-      retryRequestDelayMs: 2000,
-      connectTimeoutMs: 120000,  // Increased to 2 minutes
-      qrTimeout: 60000,          // Increased to 1 minute
-      // Keep connection alive
-      keepAliveIntervalMs: 30000
     });
 
     session.sock = sock;
@@ -246,6 +244,8 @@ async function createSession(agencyId, slot) {
         session.status = 'connected';
         session.qrCode = null;
         session.reconnecting = false;
+        // Clear reconnect counter on successful connection
+        delete global[`${clientId}_reconnect`];
 
         try {
           const user = sock.user;
@@ -295,16 +295,21 @@ async function createSession(agencyId, slot) {
           sessions.delete(clientId);
         } else if (statusCode === 515) {
           // Stream error - attempt reconnect once
-          if (!session.reconnecting) {
-            console.log(`[${clientId}] Stream error, will reconnect...`);
-            session.reconnecting = true;
-            session.status = 'connecting';
+          // Track reconnect attempts globally
+          const reconnectKey = `${clientId}_reconnect`;
+          const reconnectAttempts = global[reconnectKey] || 0;
+
+          if (reconnectAttempts < 1) {
+            console.log(`[${clientId}] Stream error, will reconnect (attempt ${reconnectAttempts + 1})...`);
+            global[reconnectKey] = reconnectAttempts + 1;
+            // Delete old session first so createSession can start fresh
+            sessions.delete(clientId);
             await delay(3000);
-            if (sessions.has(clientId)) {
-              createSession(agencyId, slot);
-            }
+            // Create a fresh session
+            createSession(agencyId, slot);
           } else {
-            console.log(`[${clientId}] Already tried reconnecting, giving up`);
+            console.log(`[${clientId}] Already tried reconnecting ${reconnectAttempts} times, giving up`);
+            delete global[reconnectKey];
             await endSession(clientId, false);
             io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'connection_failed' });
           }
@@ -816,6 +821,76 @@ io.on('connection', (socket) => {
 });
 
 // REST API
+
+// POST /connect - Initiate WhatsApp connection (used by frontend polling approach)
+app.post('/connect', async (req, res) => {
+  const { agencyId, slot = 1 } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ error: 'agencyId is required' });
+  }
+
+  console.log(`[REST] Connect request: ${agencyId}_${slot}`);
+
+  try {
+    await createSession(agencyId, slot);
+    res.json({ success: true, message: 'Connection initiated' });
+  } catch (err) {
+    console.error(`[REST] Connect failed:`, err.message);
+    res.status(500).json({ error: 'Failed to initiate connection' });
+  }
+});
+
+// GET /status - Get session status with QR code (used by frontend polling)
+app.get('/status', (req, res) => {
+  const { agencyId, slot = 1 } = req.query;
+
+  if (!agencyId) {
+    return res.status(400).json({ error: 'agencyId is required' });
+  }
+
+  const clientId = `${agencyId}_${slot}`;
+  const session = sessions.get(clientId);
+
+  if (!session) {
+    return res.json({
+      status: 'disconnected',
+      qrCode: null,
+      account: null
+    });
+  }
+
+  res.json({
+    status: session.status,
+    qrCode: session.qrCode || null,
+    account: session.info || null,
+    contactsCount: session.contacts?.size || 0,
+    chatsCount: session.chats?.size || 0,
+    syncComplete: session.syncComplete || false
+  });
+});
+
+// POST /disconnect - Disconnect WhatsApp session
+app.post('/disconnect', async (req, res) => {
+  const { agencyId, slot = 1 } = req.body;
+
+  if (!agencyId) {
+    return res.status(400).json({ error: 'agencyId is required' });
+  }
+
+  const clientId = `${agencyId}_${slot}`;
+  console.log(`[REST] Disconnect request: ${clientId}`);
+
+  try {
+    await endSession(clientId, true);
+    io.to(agencyId).emit('whatsapp:disconnected', { slot, reason: 'user_logout' });
+    res.json({ success: true, message: 'Disconnected' });
+  } catch (err) {
+    console.error(`[REST] Disconnect failed:`, err.message);
+    res.status(500).json({ error: 'Failed to disconnect' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const sessionList = [];
   for (const [id, session] of sessions.entries()) {
@@ -832,7 +907,7 @@ app.get('/api/health', (req, res) => {
 
   res.json({
     status: 'ok',
-    version: '2.3.0',  // Updated version with contact/chat sync fixes
+    version: '2.4.0',  // Fixed slot parameter, auto-fetch chats on sync
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
@@ -860,12 +935,12 @@ app.get('/api/sessions/:agencyId', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server v2.3.0 running on port ${PORT}`);
-  console.log('Fixes included:');
-  console.log('  - Removed fetchLatestBaileysVersion for stable connections');
-  console.log('  - Added contacts/chats sync event listeners');
+  console.log(`WhatsApp Server v2.4.0 running on port ${PORT}`);
+  console.log('Features:');
+  console.log('  - REST endpoints: /connect, /status, /disconnect');
+  console.log('  - Socket.IO for real-time events');
+  console.log('  - Contacts/chats sync event listeners');
   console.log('  - Connection validation after QR scan');
-  console.log('  - fetch_chats now returns individuals + groups');
 });
 
 // Graceful shutdown
