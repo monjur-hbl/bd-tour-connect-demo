@@ -76,6 +76,14 @@ export const MessagingPage: React.FC = () => {
     };
   }, [user?.agencyId]);
 
+  // Fetch messages when active chat changes
+  useEffect(() => {
+    if (whatsappStore.activeChat && whatsappStore.activeServer) {
+      // Fetch message history for this chat
+      whatsappSocket.fetchMessages(whatsappStore.activeServer, whatsappStore.activeChat);
+    }
+  }, [whatsappStore.activeChat, whatsappStore.activeServer]);
+
   // Poll WhatsApp server status via REST API
   const pollServerStatus = useCallback(async (serverId: number, showToast: boolean = false) => {
     if (!user?.agencyId) return;

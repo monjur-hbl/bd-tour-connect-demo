@@ -16,7 +16,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
 
-// Version 2.4.0 - Fixed slot parameter, auto-fetch chats on sync complete
+// Version 2.5.0 - Added message storage and history retrieval
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +48,40 @@ const io = new Server(server, {
 // Session storage - completely isolated per client
 // Each session now includes contacts and chats for proper sync
 const sessions = new Map(); // clientId -> { sock, status, info, qrCode, reconnecting, contacts, chats }
+
+// Message storage - stores messages per chat (in-memory, limited to last 100 per chat)
+// Structure: clientId -> chatId -> messages[]
+const messageStore = new Map();
+
+// Helper to store a message
+function storeMessage(clientId, chatId, message) {
+  if (!messageStore.has(clientId)) {
+    messageStore.set(clientId, new Map());
+  }
+  const clientMessages = messageStore.get(clientId);
+  if (!clientMessages.has(chatId)) {
+    clientMessages.set(chatId, []);
+  }
+  const chatMessages = clientMessages.get(chatId);
+
+  // Avoid duplicates
+  if (!chatMessages.find(m => m.id === message.id)) {
+    chatMessages.push(message);
+    // Keep only last 100 messages per chat
+    if (chatMessages.length > 100) {
+      chatMessages.shift();
+    }
+  }
+}
+
+// Helper to get messages for a chat
+function getMessages(clientId, chatId, limit = 50) {
+  if (!messageStore.has(clientId)) return [];
+  const clientMessages = messageStore.get(clientId);
+  if (!clientMessages.has(chatId)) return [];
+  const chatMessages = clientMessages.get(chatId);
+  return chatMessages.slice(-limit);
+}
 
 // Auth directory
 const authDir = path.join(__dirname, 'auth_sessions');
@@ -538,6 +572,9 @@ async function createSession(agencyId, slot) {
 
           console.log(`[${clientId}] Message: ${formattedMsg.fromMe ? 'OUT' : 'IN'} - ${body.substring(0, 50)}`);
 
+          // Store message for history retrieval
+          storeMessage(clientId, msg.key.remoteJid, formattedMsg);
+
           io.to(agencyId).emit('whatsapp:message', { slot, message: formattedMsg });
 
           // Only send notification for incoming messages
@@ -656,19 +693,24 @@ io.on('connection', (socket) => {
       }
 
       if (result) {
+        const sentMessage = {
+          id: result.key.id,
+          accountId: clientId,
+          chatId,
+          fromMe: true,
+          type: 'text',
+          body: message.body,
+          timestamp: new Date().toISOString(),
+          status: 'sent'
+        };
+
+        // Store sent message for history
+        storeMessage(clientId, chatId, sentMessage);
+
         io.to(agencyId).emit('whatsapp:message_sent', {
           slot,
           chatId,
-          message: {
-            id: result.key.id,
-            accountId: clientId,
-            chatId,
-            fromMe: true,
-            type: 'text',
-            body: message.body,
-            timestamp: new Date().toISOString(),
-            status: 'sent'
-          }
+          message: sentMessage
         });
       }
     } catch (err) {
@@ -805,10 +847,10 @@ io.on('connection', (socket) => {
 
     try {
       console.log(`[${clientId}] Fetching messages for chat: ${chatId}`);
-      // Note: Baileys doesn't have a direct fetchMessages method
-      // Messages are received via messages.upsert event
-      // We can only acknowledge we're ready to receive for this chat
-      socket.emit('whatsapp:messages', { slot, chatId, messages: [] });
+      // Get stored messages from memory
+      const messages = getMessages(clientId, chatId, limit);
+      console.log(`[${clientId}] Returning ${messages.length} stored messages for chat: ${chatId}`);
+      socket.emit('whatsapp:messages', { slot, chatId, messages });
     } catch (err) {
       console.error(`[${clientId}] Fetch messages failed:`, err.message);
       socket.emit('whatsapp:error', { error: 'Failed to fetch messages' });

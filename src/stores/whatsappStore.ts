@@ -196,14 +196,37 @@ export const useWhatsAppStore = create<WhatsAppStore>((set, get) => ({
   })),
 
   markChatAsRead: (chatId) => set((state) => {
+    // Find chat in serverChats (primary) or legacy chats
+    let unreadToSubtract = 0;
+
+    // Update serverChats for all servers
+    const updatedServerChats = { ...state.serverChats };
+    for (const serverId of Object.keys(updatedServerChats)) {
+      const serverChatList = updatedServerChats[Number(serverId)] || [];
+      const chatIndex = serverChatList.findIndex((c) => c.id === chatId);
+      if (chatIndex !== -1 && serverChatList[chatIndex].unreadCount > 0) {
+        unreadToSubtract = serverChatList[chatIndex].unreadCount;
+        updatedServerChats[Number(serverId)] = serverChatList.map((c) =>
+          c.id === chatId ? { ...c, unreadCount: 0 } : c
+        );
+        break;
+      }
+    }
+
+    // Also update legacy chats array
     const chat = state.chats.find((c) => c.id === chatId);
-    if (!chat || chat.unreadCount === 0) return state;
+    if (chat && chat.unreadCount > 0 && unreadToSubtract === 0) {
+      unreadToSubtract = chat.unreadCount;
+    }
+
+    if (unreadToSubtract === 0) return state;
 
     return {
+      serverChats: updatedServerChats,
       chats: state.chats.map((c) =>
         c.id === chatId ? { ...c, unreadCount: 0 } : c
       ),
-      unreadTotal: state.unreadTotal - chat.unreadCount,
+      unreadTotal: Math.max(0, state.unreadTotal - unreadToSubtract),
     };
   }),
 

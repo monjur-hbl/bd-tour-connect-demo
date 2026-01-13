@@ -197,7 +197,14 @@ class WhatsAppSocketService {
     // Notification - server sends 'slot' not 'serverId'
     socket.on('whatsapp:notification', ({ slot, chatId, message, contact }) => {
       const sid = slot || serverId;
-      useWhatsAppStore.getState().addNotification({
+      const store = useWhatsAppStore.getState();
+
+      // Don't show notification if this chat is currently active
+      if (store.activeChat === chatId) {
+        return;
+      }
+
+      store.addNotification({
         id: message.id,
         accountId: `server_${sid}`,
         chatId,
@@ -216,6 +223,25 @@ class WhatsAppSocketService {
       console.log(`Chats received from Server ${sid}:`, chats?.length || 0);
       if (chats && chats.length > 0) {
         useWhatsAppStore.getState().setServerChats(sid, chats);
+      }
+    });
+
+    // Messages received for a specific chat
+    socket.on('whatsapp:messages', ({ slot, chatId, messages }) => {
+      const sid = slot || serverId;
+      console.log(`Messages received from Server ${sid} for chat ${chatId}:`, messages?.length || 0);
+      if (messages && messages.length > 0) {
+        // Add from/to fields and set messages
+        const fullMessages = messages.map((msg: any) => {
+          const phoneNumber = chatId?.split('@')[0] || '';
+          return {
+            ...msg,
+            accountId: `server_${sid}`,
+            from: msg.fromMe ? 'me' : phoneNumber,
+            to: msg.fromMe ? phoneNumber : 'me',
+          };
+        });
+        useWhatsAppStore.getState().setMessages(chatId, fullMessages);
       }
     });
 
@@ -311,6 +337,23 @@ class WhatsAppSocketService {
     // Server expects slot parameter (slot 1 for server 1, etc.)
     console.log(`Fetching chats for server ${serverId}, agency ${this.agencyId}`);
     server.socket.emit('whatsapp:fetch_chats', { agencyId: this.agencyId, slot: serverId });
+  }
+
+  // Fetch messages for a specific chat
+  fetchMessages(serverId: number, chatId: string, limit: number = 50) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) {
+      console.error(`Cannot fetch messages: Server ${serverId} not connected`);
+      return;
+    }
+
+    console.log(`Fetching messages for chat ${chatId} from server ${serverId}`);
+    server.socket.emit('whatsapp:fetch_messages', {
+      agencyId: this.agencyId,
+      slot: serverId,
+      chatId,
+      limit,
+    });
   }
 
   // Get server status
