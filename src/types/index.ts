@@ -283,6 +283,7 @@ export interface WhatsAppMessage {
   mediaSize?: number;
   timestamp: string;
   status: WhatsAppMessageStatus;
+  senderName?: string;            // Name from push notification
   quotedMessage?: {
     id: string;
     body: string;

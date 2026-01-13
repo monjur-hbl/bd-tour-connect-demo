@@ -216,6 +216,67 @@ export const useWhatsAppStore = create<WhatsAppStore>((set, get) => ({
 
   addMessage: (chatId, message) => set((state) => {
     const chatMessages = state.messages[chatId] || [];
+
+    // Determine which server this message belongs to based on accountId
+    const serverId = message.accountId?.includes('server_')
+      ? parseInt(message.accountId.replace('server_', ''))
+      : state.activeServer;
+
+    // Update serverChats (this is what the UI displays)
+    const updatedServerChats = { ...state.serverChats };
+    const serverChatList = [...(updatedServerChats[serverId] || [])];
+    let chatFound = false;
+
+    for (let i = 0; i < serverChatList.length; i++) {
+      if (serverChatList[i].id === chatId) {
+        chatFound = true;
+        const isActiveChat = state.activeChat === chatId;
+        serverChatList[i] = {
+          ...serverChatList[i],
+          lastMessage: message,
+          unreadCount: message.fromMe || isActiveChat
+            ? serverChatList[i].unreadCount
+            : serverChatList[i].unreadCount + 1,
+        };
+        break;
+      }
+    }
+
+    // If chat not found in serverChats, create a new chat entry
+    if (!chatFound) {
+      const phoneNumber = chatId.split('@')[0];
+      const isGroup = chatId.endsWith('@g.us');
+      serverChatList.unshift({
+        id: chatId,
+        accountId: message.accountId || `server_${serverId}`,
+        contact: {
+          id: chatId,
+          phoneNumber,
+          name: message.senderName || phoneNumber,
+          isGroup,
+          isBlocked: false,
+        },
+        type: isGroup ? 'group' : 'individual',
+        lastMessage: message,
+        unreadCount: message.fromMe ? 0 : 1,
+        isPinned: false,
+        isMuted: false,
+        isArchived: false,
+      });
+    }
+
+    // Sort chats by pinned first, then by last message time
+    serverChatList.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      const aTime = a.lastMessage?.timestamp || '';
+      const bTime = b.lastMessage?.timestamp || '';
+      return bTime.localeCompare(aTime);
+    });
+
+    updatedServerChats[serverId] = serverChatList;
+
+    // Also update the legacy chats array for backward compatibility
     const updatedChats = state.chats.map((chat) => {
       if (chat.id === chatId) {
         const isActiveChat = state.activeChat === chatId;
@@ -244,6 +305,7 @@ export const useWhatsAppStore = create<WhatsAppStore>((set, get) => ({
         ...state.messages,
         [chatId]: [...chatMessages, message],
       },
+      serverChats: updatedServerChats,
       chats: updatedChats,
       unreadTotal: newUnreadTotal,
     };

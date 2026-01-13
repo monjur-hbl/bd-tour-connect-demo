@@ -164,20 +164,34 @@ class WhatsAppSocketService {
     socket.on('whatsapp:message', ({ slot, message }) => {
       const sid = slot || serverId;
       console.log(`Message from Server ${sid}:`, message);
-      useWhatsAppStore.getState().addMessage(message.chatId, {
+
+      // Add required fields that the server might not send
+      const phoneNumber = message.chatId?.split('@')[0] || '';
+      const fullMessage = {
         ...message,
         accountId: `server_${sid}`,
-      });
+        from: message.fromMe ? 'me' : phoneNumber,
+        to: message.fromMe ? phoneNumber : 'me',
+      };
+
+      useWhatsAppStore.getState().addMessage(message.chatId, fullMessage);
     });
 
     // Message sent confirmation - server sends 'slot' not 'serverId'
     socket.on('whatsapp:message_sent', ({ slot, chatId, message }) => {
       const sid = slot || serverId;
       console.log(`Message sent on Server ${sid}:`, chatId);
-      useWhatsAppStore.getState().addMessage(chatId, {
+
+      // Add required fields that the server might not send
+      const phoneNumber = chatId?.split('@')[0] || '';
+      const fullMessage = {
         ...message,
         accountId: `server_${sid}`,
-      });
+        from: message.fromMe ? 'me' : phoneNumber,
+        to: message.fromMe ? phoneNumber : 'me',
+      };
+
+      useWhatsAppStore.getState().addMessage(chatId, fullMessage);
     });
 
     // Notification - server sends 'slot' not 'serverId'
