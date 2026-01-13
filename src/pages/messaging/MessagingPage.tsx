@@ -81,7 +81,7 @@ export const MessagingPage: React.FC = () => {
     if (!user?.agencyId) return;
 
     try {
-      const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}`);
+      const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}&slot=${serverId}`);
       const data = await response.json();
 
       const currentStatus = useWhatsAppStore.getState().serverStatuses[serverId];
@@ -149,7 +149,7 @@ export const MessagingPage: React.FC = () => {
       const response = await fetch(`${getServerUrl(serverId)}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agencyId: user.agencyId }),
+        body: JSON.stringify({ agencyId: user.agencyId, slot: serverId }),
       });
 
       if (!response.ok) throw new Error('Failed to connect');

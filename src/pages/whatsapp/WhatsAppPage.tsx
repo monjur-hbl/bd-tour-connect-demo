@@ -54,7 +54,7 @@ export const WhatsAppPage: React.FC = () => {
     if (!user?.agencyId) return;
 
     try {
-      const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}`);
+      const response = await fetch(`${getServerUrl(serverId)}/status?agencyId=${user.agencyId}&slot=${serverId}`);
       const data = await response.json();
 
       // Get current status to check if this is a new connection
@@ -205,7 +205,7 @@ export const WhatsAppPage: React.FC = () => {
       const response = await fetch(`${getServerUrl(serverId)}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agencyId: user.agencyId }),
+        body: JSON.stringify({ agencyId: user.agencyId, slot: serverId }),
       });
 
       if (!response.ok) {
