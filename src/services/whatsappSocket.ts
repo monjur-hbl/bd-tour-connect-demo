@@ -217,6 +217,13 @@ class WhatsAppSocketService {
       });
     });
 
+    // Message status update (read receipts, delivery status)
+    socket.on('whatsapp:message_status', ({ slot, messageId, chatId, status }) => {
+      const sid = slot || serverId;
+      console.log(`Message status update from Server ${sid}: ${messageId} -> ${status}`);
+      useWhatsAppStore.getState().updateMessage(chatId, messageId, { status });
+    });
+
     // Chats received - server sends 'slot' not 'serverId'
     socket.on('whatsapp:chats', ({ slot, chats }) => {
       const sid = slot || serverId;
@@ -353,6 +360,38 @@ class WhatsAppSocketService {
       slot: serverId,
       chatId,
       limit,
+    });
+  }
+
+  // Mark messages as read (send read receipts)
+  markAsRead(serverId: number, chatId: string, messageIds: string[]) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) {
+      console.error(`Cannot mark as read: Server ${serverId} not connected`);
+      return;
+    }
+
+    console.log(`Marking ${messageIds.length} messages as read in ${chatId}`);
+    server.socket.emit('whatsapp:mark_read', {
+      agencyId: this.agencyId,
+      slot: serverId,
+      chatId,
+      messageIds,
+    });
+  }
+
+  // Send typing indicator
+  sendTyping(serverId: number, chatId: string, isTyping: boolean) {
+    const server = this.servers.get(serverId);
+    if (!server?.socket || !this.agencyId) {
+      return;
+    }
+
+    server.socket.emit('whatsapp:typing', {
+      agencyId: this.agencyId,
+      slot: serverId,
+      chatId,
+      isTyping,
     });
   }
 

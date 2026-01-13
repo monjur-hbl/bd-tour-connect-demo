@@ -52,39 +52,7 @@ export const MessagingPage: React.FC = () => {
     return serverId === 1 ? WHATSAPP_SERVER_1_URL : WHATSAPP_SERVER_2_URL;
   };
 
-  // Initialize services on mount
-  useEffect(() => {
-    if (user?.agencyId) {
-      // Initialize WhatsApp
-      whatsappSocket.connect(user.agencyId);
-      pollServerStatus(1);
-      pollServerStatus(2);
-
-      // Initialize Facebook
-      facebookService.init(user.agencyId);
-
-      // Request notification permission
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-    }
-
-    return () => {
-      Object.values(pollingRef.current).forEach((interval) => {
-        if (interval) clearInterval(interval);
-      });
-    };
-  }, [user?.agencyId]);
-
-  // Fetch messages when active chat changes
-  useEffect(() => {
-    if (whatsappStore.activeChat && whatsappStore.activeServer) {
-      // Fetch message history for this chat
-      whatsappSocket.fetchMessages(whatsappStore.activeServer, whatsappStore.activeChat);
-    }
-  }, [whatsappStore.activeChat, whatsappStore.activeServer]);
-
-  // Poll WhatsApp server status via REST API
+  // Poll WhatsApp server status via REST API (defined before useEffect that uses it)
   const pollServerStatus = useCallback(async (serverId: number, showToast: boolean = false) => {
     if (!user?.agencyId) return;
 
@@ -142,6 +110,58 @@ export const MessagingPage: React.FC = () => {
       console.error(`Error polling server ${serverId}:`, err);
     }
   }, [user?.agencyId]);
+
+  // Initialize services on mount
+  useEffect(() => {
+    if (user?.agencyId) {
+      // Initialize WhatsApp
+      whatsappSocket.connect(user.agencyId);
+
+      // Poll status immediately and continuously
+      pollServerStatus(1);
+      pollServerStatus(2);
+
+      // Set up continuous status polling every 5 seconds
+      const statusInterval = setInterval(() => {
+        pollServerStatus(1);
+        pollServerStatus(2);
+      }, 5000);
+
+      // Initialize Facebook
+      facebookService.init(user.agencyId);
+
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+
+      return () => {
+        clearInterval(statusInterval);
+        Object.values(pollingRef.current).forEach((interval) => {
+          if (interval) clearInterval(interval);
+        });
+      };
+    }
+  }, [user?.agencyId, pollServerStatus]);
+
+  // Fetch messages and send read receipts when active chat changes
+  useEffect(() => {
+    if (whatsappStore.activeChat && whatsappStore.activeServer) {
+      // Fetch message history for this chat
+      whatsappSocket.fetchMessages(whatsappStore.activeServer, whatsappStore.activeChat);
+
+      // Get unread messages to mark as read
+      const messages = whatsappStore.messages[whatsappStore.activeChat] || [];
+      const unreadMessageIds = messages
+        .filter(msg => !msg.fromMe && msg.status !== 'read')
+        .map(msg => msg.id);
+
+      // Send read receipts for unread messages
+      if (unreadMessageIds.length > 0) {
+        whatsappSocket.markAsRead(whatsappStore.activeServer, whatsappStore.activeChat, unreadMessageIds);
+      }
+    }
+  }, [whatsappStore.activeChat, whatsappStore.activeServer, whatsappStore.messages]);
 
   // Check if user is admin
   const isAdmin = user?.role === 'agency_admin' || user?.role === 'system_admin';
@@ -676,8 +696,16 @@ export const MessagingPage: React.FC = () => {
               }}
               onReply={whatsappStore.setReplyToMessage}
               onCancelReply={() => whatsappStore.setReplyToMessage(null)}
-              onStartTyping={() => {}}
-              onStopTyping={() => {}}
+              onStartTyping={() => {
+                if (whatsappStore.activeChat) {
+                  whatsappSocket.sendTyping(activeServer, whatsappStore.activeChat, true);
+                }
+              }}
+              onStopTyping={() => {
+                if (whatsappStore.activeChat) {
+                  whatsappSocket.sendTyping(activeServer, whatsappStore.activeChat, false);
+                }
+              }}
               onPin={(pinned) => {
                 if (whatsappStore.activeChat) {
                   whatsappStore.updateChat(whatsappStore.activeChat, { isPinned: pinned });

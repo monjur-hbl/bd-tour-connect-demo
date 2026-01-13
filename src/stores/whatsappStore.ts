@@ -434,9 +434,22 @@ export const useWhatsAppStore = create<WhatsAppStore>((set, get) => ({
 
   setServerStatuses: (statuses) => set({ serverStatuses: statuses }),
 
-  setServerChats: (serverId, chats) => set((state) => ({
-    serverChats: { ...state.serverChats, [serverId]: chats },
-  })),
+  setServerChats: (serverId, chats) => set((state) => {
+    const updatedServerChats = { ...state.serverChats, [serverId]: chats };
+
+    // Calculate total unread from all server chats
+    let totalUnread = 0;
+    for (const serverChatList of Object.values(updatedServerChats)) {
+      for (const chat of serverChatList as any[]) {
+        totalUnread += chat.unreadCount || 0;
+      }
+    }
+
+    return {
+      serverChats: updatedServerChats,
+      unreadTotal: totalUnread,
+    };
+  }),
 
   getServerName: (serverId) => {
     const state = get();

@@ -363,6 +363,7 @@ interface MobileHeaderProps {
 
 export const MobileHeader: React.FC<MobileHeaderProps> = ({ onMenuClick }) => {
   const { user } = useAuthStore();
+  const { unreadTotal } = useWhatsAppStore();
 
   return (
     <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white border-b border-sand-200 flex items-center justify-between px-4 z-30">
@@ -378,8 +379,18 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ onMenuClick }) => {
         </div>
       </div>
 
-      {/* Right side: User avatar and Menu button */}
+      {/* Right side: Notification badge, User avatar and Menu button */}
       <div className="flex items-center gap-2">
+        {/* Notification badge */}
+        {unreadTotal > 0 && (
+          <div className="relative">
+            <MessagingIcon />
+            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-green-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center">
+              {unreadTotal > 99 ? '99+' : unreadTotal}
+            </span>
+          </div>
+        )}
+
         {/* User avatar */}
         <div className="w-8 h-8 bg-gradient-ocean rounded-full flex items-center justify-center text-white font-bold text-sm">
           {user?.name?.charAt(0) || 'U'}
@@ -388,12 +399,15 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ onMenuClick }) => {
         {/* Hamburger Menu Button */}
         <button
           onClick={onMenuClick}
-          className="p-2 text-sand-600 hover:text-sand-800 hover:bg-sand-100 rounded-lg transition-colors"
+          className="p-2 text-sand-600 hover:text-sand-800 hover:bg-sand-100 rounded-lg transition-colors relative"
           aria-label="Open menu"
         >
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
+          {unreadTotal > 0 && (
+            <span className="absolute top-0 right-0 w-2 h-2 bg-green-500 rounded-full" />
+          )}
         </button>
       </div>
     </header>

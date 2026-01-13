@@ -16,7 +16,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
 
-// Version 2.5.0 - Added message storage and history retrieval
+// Version 2.6.0 - Added read receipts, message status updates, typing indicators
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -857,6 +857,51 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Send typing indicator
+  socket.on('whatsapp:typing', async ({ agencyId, slot, chatId, isTyping }) => {
+    const clientId = `${agencyId}_${slot}`;
+    const session = sessions.get(clientId);
+
+    if (!session?.sock || session.status !== 'connected') {
+      return;
+    }
+
+    try {
+      await session.sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', chatId);
+    } catch (err) {
+      console.error(`[${clientId}] Typing indicator failed:`, err.message);
+    }
+  });
+
+  // Mark messages as read (send read receipts)
+  socket.on('whatsapp:mark_read', async ({ agencyId, slot, chatId, messageIds }) => {
+    const clientId = `${agencyId}_${slot}`;
+    const session = sessions.get(clientId);
+
+    if (!session?.sock || session.status !== 'connected') {
+      socket.emit('whatsapp:error', { error: 'WhatsApp not connected' });
+      return;
+    }
+
+    try {
+      console.log(`[${clientId}] Marking ${messageIds?.length || 0} messages as read in ${chatId}`);
+
+      // Create message keys for read receipt
+      const keys = messageIds.map(id => ({
+        remoteJid: chatId,
+        id: id,
+        fromMe: false
+      }));
+
+      // Send read receipt
+      await session.sock.readMessages(keys);
+
+      console.log(`[${clientId}] Read receipts sent for ${chatId}`);
+    } catch (err) {
+      console.error(`[${clientId}] Mark read failed:`, err.message);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Socket disconnected:', socket.id);
   });
@@ -949,12 +994,36 @@ app.get('/api/health', (req, res) => {
 
   res.json({
     status: 'ok',
-    version: '2.4.0',  // Fixed slot parameter, auto-fetch chats on sync
+    version: '2.6.0',  // Added read receipts, typing indicators, message storage
     environment: isCloudRun ? 'cloud-run' : 'local',
     sessions: sessions.size,
     sessionList,
     connections: io.engine.clientsCount
   });
+});
+
+// POST /api/clear-cache - Clear all sessions and message storage
+app.post('/api/clear-cache', async (req, res) => {
+  console.log('[REST] Clear cache request');
+
+  try {
+    // End all sessions
+    for (const [clientId] of sessions.entries()) {
+      await endSession(clientId, true);
+    }
+
+    // Clear message store
+    messageStore.clear();
+
+    // Clear sessions map
+    sessions.clear();
+
+    console.log('[REST] All sessions and cache cleared');
+    res.json({ success: true, message: 'All sessions and cache cleared' });
+  } catch (err) {
+    console.error('[REST] Clear cache failed:', err.message);
+    res.status(500).json({ error: 'Failed to clear cache' });
+  }
 });
 
 app.get('/api/sessions/:agencyId', (req, res) => {
