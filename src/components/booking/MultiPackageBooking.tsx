@@ -4,9 +4,9 @@ import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../common/Card';
 import { packagesAPI, bookingsAPI } from '../../services/api';
 import { BusSeatLayoutPicker } from '../seats';
-import { SeatLayout, BusConfiguration, PassengerGender, PaymentMethod, Agency } from '../../types';
+import { SeatLayout, BusConfiguration, PassengerGender, PaymentMethod, Agency, AgentType } from '../../types';
 import { HoldSeatsModal } from './HoldSeatsModal';
-import { ShoppingCart, Lock, Clock, CreditCard, Smartphone, Banknote, Building2, CircleDollarSign, AlertTriangle } from 'lucide-react';
+import { ShoppingCart, Lock, Clock, CreditCard, Smartphone, Banknote, Building2, CircleDollarSign, AlertTriangle, Percent, TrendingUp, TrendingDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Types
@@ -119,6 +119,21 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
 
   // Hold modal state
   const [holdModalPackage, setHoldModalPackage] = useState<Package | null>(null);
+
+  // Price modification state (for 3rd party agents)
+  const [priceModification, setPriceModification] = useState<number>(0); // Percentage: -10 to +10
+
+  // Check if user can modify prices (3rd party agent with permission)
+  const canModifyPrices = useMemo(() => {
+    if (userRole !== 'sales_agent') return false;
+    if (user?.agentType !== 'third_party') return false;
+    return user?.agentAccountSettings?.canModifyPrices === true;
+  }, [userRole, user]);
+
+  // Price modification limit
+  const priceModificationLimit = useMemo(() => {
+    return user?.agentAccountSettings?.priceModificationLimit || 10;
+  }, [user]);
 
   // Agency settings for minimum advance
   const bookingSettings = agency?.bookingSettings || {
@@ -287,12 +302,19 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     }, 0);
   };
 
-  // Calculate subtotal (before discount)
-  const subtotalBeforeDiscount = useMemo(() => {
+  // Calculate original subtotal (without price modification)
+  const originalSubtotal = useMemo(() => {
     return packageBookings.reduce((total, booking) => {
       return total + calculatePackageSubtotal(booking);
     }, 0);
   }, [packageBookings]);
+
+  // Calculate subtotal (before discount, after price modification)
+  const subtotalBeforeDiscount = useMemo(() => {
+    const base = originalSubtotal;
+    if (priceModification === 0) return base;
+    return Math.round(base * (1 + priceModification / 100));
+  }, [originalSubtotal, priceModification]);
 
   // Calculate grand total (after discount)
   const grandTotal = useMemo(() => {
@@ -411,10 +433,18 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           ? booking.customDroppingPoint
           : booking.droppingPoint;
 
+        // Calculate modified subtotal if price modification is applied
+        const modifiedSubtotal = priceModification !== 0
+          ? Math.round(subtotal * (1 + priceModification / 100))
+          : subtotal;
+
         // Calculate proportional discount for this booking
-        const discountProportion = subtotalBeforeDiscount > 0 ? subtotal / subtotalBeforeDiscount : 0;
+        const discountProportion = subtotalBeforeDiscount > 0 ? modifiedSubtotal / subtotalBeforeDiscount : 0;
         const bookingDiscount = Math.round(paymentData.discountAmount * discountProportion);
-        const finalAmount = subtotal - bookingDiscount;
+        const finalAmount = modifiedSubtotal - bookingDiscount;
+
+        // Original amount (before any price modification - for agency accounting)
+        const originalFinalAmount = subtotal - Math.round(paymentData.discountAmount * (subtotalBeforeDiscount > 0 ? subtotal / originalSubtotal : 0));
 
         // Calculate hold expiry time (1 hour for agents)
         const holdExpiresAt = isHoldBooking
@@ -426,6 +456,7 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           agencyId: user.agencyId,
           agentId: userRole === 'sales_agent' ? user.id : undefined,
           agentName: user.name,
+          agentType: userRole === 'sales_agent' ? user.agentType : undefined,
           guestName: validGuests[0].name,
           guestPhone: validGuests[0].phone || '',
           guestEmail: validGuests[0].email || undefined,
@@ -434,10 +465,20 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           passengers: passengersWithSeats,
           boardingPoint: booking.boardingPoint || undefined,
           droppingPoint: droppingPoint || undefined,
-          subtotal,
+          // Original prices (for agency accounting)
+          originalPricePerPerson: booking.package.pricePerPerson,
+          originalSubtotal: subtotal,
+          originalTotalAmount: originalFinalAmount,
+          // Modified prices (shown to customer if 3rd party agent modified)
+          subtotal: modifiedSubtotal,
           discountAmount: bookingDiscount,
           discountReason: paymentData.discountReason || undefined,
           totalAmount: finalAmount,
+          // Price modification tracking
+          modifiedPricePerPerson: priceModification !== 0 ? Math.round(booking.package.pricePerPerson * (1 + priceModification / 100)) : undefined,
+          priceModifiedByAgent: priceModification !== 0,
+          priceModificationPercent: priceModification !== 0 ? priceModification : undefined,
+          // Payment
           advancePaid: isHoldBooking ? 0 : (grandTotal > 0 ? Math.round((Number(paymentData.advancePaid) / grandTotal) * finalAmount) : 0),
           paymentMethod: isHoldBooking ? 'cash' : paymentData.paymentMethod,
           paymentHistory: isHoldBooking ? [] : [{
@@ -1123,6 +1164,98 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
                         To make changes, you must cancel and create a new booking.
                       </p>
                     </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Price Modification - Only for 3rd party agents with permission */}
+          {canModifyPrices && (
+            <Card className={`border-2 transition-all ${priceModification !== 0 ? 'border-purple-400 bg-purple-50' : 'border-sand-200'}`}>
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <Percent className="w-5 h-5 text-purple-600" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-semibold text-sand-800">Adjust Pricing</h3>
+                    <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">3rd Party Agent</span>
+                  </div>
+                  <p className="text-sm text-sand-600 mb-4">
+                    You can adjust prices by up to <span className="font-bold text-purple-600">±{priceModificationLimit}%</span>.
+                    This only affects the customer invoice - agency accounting uses original prices.
+                  </p>
+
+                  <div className="flex items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setPriceModification(Math.max(-priceModificationLimit, priceModification - 1))}
+                      disabled={priceModification <= -priceModificationLimit}
+                      className="w-10 h-10 rounded-lg bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <TrendingDown className="w-5 h-5" />
+                    </button>
+
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-sand-500">-{priceModificationLimit}%</span>
+                        <span className={`text-lg font-bold ${
+                          priceModification > 0 ? 'text-green-600' :
+                          priceModification < 0 ? 'text-red-600' :
+                          'text-sand-600'
+                        }`}>
+                          {priceModification > 0 ? '+' : ''}{priceModification}%
+                        </span>
+                        <span className="text-xs text-sand-500">+{priceModificationLimit}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={-priceModificationLimit}
+                        max={priceModificationLimit}
+                        value={priceModification}
+                        onChange={(e) => setPriceModification(Number(e.target.value))}
+                        className="w-full h-2 bg-sand-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPriceModification(Math.min(priceModificationLimit, priceModification + 1))}
+                      disabled={priceModification >= priceModificationLimit}
+                      className="w-10 h-10 rounded-lg bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <TrendingUp className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {priceModification !== 0 && (
+                    <div className="mt-4 p-3 bg-purple-100 rounded-lg">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-purple-700">Original Price:</span>
+                        <span className="text-sand-600 line-through">{formatCurrency(originalSubtotal)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-medium mt-1">
+                        <span className="text-purple-700">Customer Price:</span>
+                        <span className={priceModification > 0 ? 'text-green-600' : 'text-red-600'}>
+                          {formatCurrency(subtotalBeforeDiscount)}
+                          <span className="text-xs ml-1">({priceModification > 0 ? '+' : ''}{priceModification}%)</span>
+                        </span>
+                      </div>
+                      <p className="text-xs text-purple-600 mt-2">
+                        * Agency accounting will use original price of {formatCurrency(originalSubtotal)}
+                      </p>
+                    </div>
+                  )}
+
+                  {priceModification !== 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPriceModification(0)}
+                      className="mt-3 text-sm text-purple-600 hover:text-purple-700 underline"
+                    >
+                      Reset to original price
+                    </button>
                   )}
                 </div>
               </div>
