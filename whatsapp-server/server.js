@@ -16,7 +16,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
 
-// Version 2.6.0 - Added read receipts, message status updates, typing indicators
+// Version 2.7.0 - Added image and audio sending support
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -605,11 +605,13 @@ async function createSession(agencyId, slot) {
             3: 'delivered',
             4: 'read'
           };
+          const statusName = statusMap[update.update.status] || 'sent';
+          console.log(`[${clientId}] Message status: ${update.key.id?.substring(0, 10)}... -> ${statusName}`);
           io.to(agencyId).emit('whatsapp:message_status', {
             slot,
             messageId: update.key.id,
             chatId: update.key.remoteJid,
-            status: statusMap[update.update.status] || 'sent'
+            status: statusName
           });
         }
       }
@@ -688,8 +690,87 @@ io.on('connection', (socket) => {
 
     try {
       let result;
-      if (message.type === 'text') {
-        result = await session.sock.sendMessage(chatId, { text: message.body });
+      let msgType = message.type || 'text';
+      let body = message.body || '';
+
+      if (msgType === 'text') {
+        result = await session.sock.sendMessage(chatId, { text: body });
+      } else if (msgType === 'image') {
+        // Image can be sent as base64 or URL
+        const imageData = message.media || message.body;
+        if (imageData.startsWith('data:')) {
+          // Base64 image
+          const base64Data = imageData.split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          result = await session.sock.sendMessage(chatId, {
+            image: buffer,
+            caption: message.caption || ''
+          });
+        } else if (imageData.startsWith('http')) {
+          // URL image
+          result = await session.sock.sendMessage(chatId, {
+            image: { url: imageData },
+            caption: message.caption || ''
+          });
+        }
+        body = message.caption || '[Image]';
+      } else if (msgType === 'audio') {
+        // Audio can be sent as base64 or URL
+        const audioData = message.media || message.body;
+        if (audioData.startsWith('data:')) {
+          // Base64 audio
+          const base64Data = audioData.split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          result = await session.sock.sendMessage(chatId, {
+            audio: buffer,
+            mimetype: 'audio/mp4',
+            ptt: message.ptt !== false // Voice note by default
+          });
+        } else if (audioData.startsWith('http')) {
+          // URL audio
+          result = await session.sock.sendMessage(chatId, {
+            audio: { url: audioData },
+            mimetype: 'audio/mp4',
+            ptt: message.ptt !== false
+          });
+        }
+        body = '[Audio]';
+      } else if (msgType === 'document') {
+        // Document/file sending
+        const docData = message.media || message.body;
+        if (docData.startsWith('data:')) {
+          const base64Data = docData.split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          result = await session.sock.sendMessage(chatId, {
+            document: buffer,
+            mimetype: message.mimetype || 'application/octet-stream',
+            fileName: message.fileName || 'file'
+          });
+        } else if (docData.startsWith('http')) {
+          result = await session.sock.sendMessage(chatId, {
+            document: { url: docData },
+            mimetype: message.mimetype || 'application/octet-stream',
+            fileName: message.fileName || 'file'
+          });
+        }
+        body = message.fileName || '[Document]';
+      } else if (msgType === 'video') {
+        // Video sending
+        const videoData = message.media || message.body;
+        if (videoData.startsWith('data:')) {
+          const base64Data = videoData.split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          result = await session.sock.sendMessage(chatId, {
+            video: buffer,
+            caption: message.caption || ''
+          });
+        } else if (videoData.startsWith('http')) {
+          result = await session.sock.sendMessage(chatId, {
+            video: { url: videoData },
+            caption: message.caption || ''
+          });
+        }
+        body = message.caption || '[Video]';
       }
 
       if (result) {
@@ -698,14 +779,16 @@ io.on('connection', (socket) => {
           accountId: clientId,
           chatId,
           fromMe: true,
-          type: 'text',
-          body: message.body,
+          type: msgType,
+          body: body,
           timestamp: new Date().toISOString(),
           status: 'sent'
         };
 
         // Store sent message for history
         storeMessage(clientId, chatId, sentMessage);
+
+        console.log(`[${clientId}] Sent ${msgType}: ${body.substring(0, 50)}`);
 
         io.to(agencyId).emit('whatsapp:message_sent', {
           slot,
@@ -715,7 +798,7 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error(`[${clientId}] Send failed:`, err.message);
-      socket.emit('whatsapp:error', { error: 'Failed to send message' });
+      socket.emit('whatsapp:error', { error: `Failed to send ${message.type || 'message'}: ${err.message}` });
     }
   });
 
@@ -1046,11 +1129,13 @@ app.get('/api/sessions/:agencyId', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`WhatsApp Server v2.4.0 running on port ${PORT}`);
+  console.log(`WhatsApp Server v2.7.0 running on port ${PORT}`);
   console.log('Features:');
   console.log('  - REST endpoints: /connect, /status, /disconnect');
   console.log('  - Socket.IO for real-time events');
-  console.log('  - Contacts/chats sync event listeners');
+  console.log('  - Send/receive text, image, audio, video, documents');
+  console.log('  - Read receipts and message status updates');
+  console.log('  - Typing indicators');
   console.log('  - Connection validation after QR scan');
 });
 

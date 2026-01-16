@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../../components/common/Card';
 import { ShareModal } from '../../components/common/ShareModal';
+import { HoldTimer, HoldStatusBadge } from '../../components/booking/HoldTimer';
 import { bookingsAPI } from '../../services/api';
 import { generateInvoicePDF } from '../../utils/invoice';
+import { Clock, CreditCard, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Booking {
@@ -25,17 +27,23 @@ interface Booking {
   dueAmount: number;
   paymentMethod: string;
   paymentStatus: string;
+  paymentHistory?: { method: string; transactionId: string; amount: number; paidAt: string }[];
   status: string;
+  isHold?: boolean;
+  holdExpiresAt?: string;
   source: string;
   notes: string;
   createdAt: string;
+  agentName?: string;
 }
 
 const STATUS_OPTIONS = [
+  { value: 'hold', label: 'On Hold', labelBn: 'হোল্ড', color: 'bg-amber-100 text-amber-700' },
   { value: 'pending', label: 'Pending', labelBn: 'মুলতুবি', color: 'bg-yellow-100 text-yellow-700' },
   { value: 'confirmed', label: 'Confirmed', labelBn: 'নিশ্চিত', color: 'bg-green-100 text-green-700' },
   { value: 'cancelled', label: 'Cancelled', labelBn: 'বাতিল', color: 'bg-red-100 text-red-700' },
   { value: 'completed', label: 'Completed', labelBn: 'সম্পন্ন', color: 'bg-blue-100 text-blue-700' },
+  { value: 'expired', label: 'Expired', labelBn: 'মেয়াদ শেষ', color: 'bg-gray-100 text-gray-700' },
 ];
 
 export const MyBookings: React.FC = () => {
@@ -152,12 +160,14 @@ export const MyBookings: React.FC = () => {
     }).format(amount);
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, isHold?: boolean) => {
+    if (isHold || status === 'hold') return 'bg-amber-100 text-amber-700';
     const option = STATUS_OPTIONS.find(o => o.value === status);
     return option?.color || 'bg-gray-100 text-gray-700';
   };
 
-  const getPaymentStatusBadge = (status: string) => {
+  const getPaymentStatusBadge = (status: string, isHold?: boolean) => {
+    if (isHold) return 'bg-amber-100 text-amber-700';
     switch (status) {
       case 'fully_paid': return 'bg-green-100 text-green-700';
       case 'advance_paid': return 'bg-yellow-100 text-yellow-700';
@@ -165,10 +175,16 @@ export const MyBookings: React.FC = () => {
     }
   };
 
+  const getPaymentStatusLabel = (status: string, isHold?: boolean) => {
+    if (isHold) return 'on hold';
+    return status.replace('_', ' ');
+  };
+
   // Calculate stats
   const stats = {
     total: bookings.length,
-    pending: bookings.filter(b => b.status === 'pending').length,
+    onHold: bookings.filter(b => b.isHold || b.status === 'hold').length,
+    pending: bookings.filter(b => b.status === 'pending' && !b.isHold).length,
     confirmed: bookings.filter(b => b.status === 'confirmed').length,
     totalRevenue: bookings.reduce((sum, b) => sum + b.totalAmount, 0),
     collected: bookings.reduce((sum, b) => sum + b.advancePaid, 0),
@@ -196,11 +212,20 @@ export const MyBookings: React.FC = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <Card>
           <div className="text-center">
             <p className="text-3xl font-bold text-sand-800">{stats.total}</p>
             <p className="text-sand-500 text-sm">Total</p>
+          </div>
+        </Card>
+        <Card className={stats.onHold > 0 ? 'bg-amber-50 border-amber-200' : ''}>
+          <div className="text-center">
+            <p className="text-3xl font-bold text-amber-600">{stats.onHold}</p>
+            <p className="text-amber-600 text-sm flex items-center justify-center gap-1">
+              <Clock className="w-3 h-3" />
+              On Hold
+            </p>
           </div>
         </Card>
         <Card>
@@ -269,21 +294,48 @@ export const MyBookings: React.FC = () => {
       {/* Bookings List */}
       <div className="space-y-4">
         {bookings.length > 0 ? bookings.map((booking) => (
-          <Card key={booking.id} className="hover:shadow-lg transition-shadow">
+          <Card
+            key={booking.id}
+            className={`hover:shadow-lg transition-shadow ${
+              booking.isHold || booking.status === 'hold'
+                ? 'border-l-4 border-l-amber-500 bg-amber-50/30'
+                : ''
+            }`}
+          >
+            {/* Hold Timer Banner */}
+            {(booking.isHold || booking.status === 'hold') && booking.holdExpiresAt && (
+              <div className="mb-4 -mx-4 -mt-4 px-4 py-3 bg-amber-50 border-b border-amber-200 rounded-t-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="text-sm font-medium">Payment required to confirm this booking</span>
+                  </div>
+                  <HoldTimer holdExpiresAt={booking.holdExpiresAt} size="sm" variant="badge" />
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-primary-100 text-primary-700 rounded-xl flex items-center justify-center font-mono font-bold">
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center font-mono font-bold ${
+                  booking.isHold || booking.status === 'hold'
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-primary-100 text-primary-700'
+                }`}>
                   #{booking.bookingId}
                 </div>
                 <div>
                   <h3 className="font-bold text-sand-800">{booking.guestName}</h3>
                   <p className="text-sand-500 text-sm">{booking.guestPhone}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusBadge(booking.status)}`}>
-                      {booking.status}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getPaymentStatusBadge(booking.paymentStatus)}`}>
-                      {booking.paymentStatus.replace('_', ' ')}
+                    <HoldStatusBadge
+                      status={booking.status}
+                      isHold={booking.isHold}
+                      holdExpiresAt={booking.holdExpiresAt}
+                      paymentStatus={booking.paymentStatus}
+                    />
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getPaymentStatusBadge(booking.paymentStatus, booking.isHold)}`}>
+                      {getPaymentStatusLabel(booking.paymentStatus, booking.isHold)}
                     </span>
                   </div>
                 </div>

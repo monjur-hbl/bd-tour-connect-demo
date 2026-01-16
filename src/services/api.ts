@@ -180,6 +180,19 @@ export const bookingsAPI = {
 
     return apiRequest<{ bookings: any[] }>(`/bookings/search?${searchParams}`);
   },
+
+  async delete(id: string) {
+    return apiRequest<{ message: string }>(`/bookings/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async cancel(id: string, reason?: string) {
+    return apiRequest<{ message: string }>(`/bookings/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
 };
 
 // ============================================

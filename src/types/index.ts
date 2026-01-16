@@ -1,6 +1,18 @@
 // Type definitions for BD Tour Connect
 
 export type UserRole = 'system_admin' | 'agency_admin' | 'sales_agent';
+export type AgentType = 'in_house' | 'third_party';
+
+export interface AgentAccountSettings {
+  accountBalance: number; // Current account balance set by agency admin
+  creditLimit: number; // Maximum booking value allowed
+  usedBalance: number; // Total amount used for bookings
+  availableBalance: number; // accountBalance - usedBalance
+  canModifyPrices: boolean; // Only for 3rd party agents
+  priceModificationLimit?: number; // Max % they can modify prices (e.g., 10 = 10%)
+  lastTopUpDate?: string;
+  lastTopUpAmount?: number;
+}
 
 export interface User {
   id: string;
@@ -11,7 +23,13 @@ export interface User {
   role: UserRole;
   agencyId?: string;
   agentCode?: string;
+  agentType?: AgentType; // 'in_house' or 'third_party'
+  agentAccountSettings?: AgentAccountSettings; // Account balance and limits
   permissions?: string[];
+  canModifyBookings?: boolean; // Only agency admin can set this true
+  canCancelBookings?: boolean;
+  canDeleteBookings?: boolean;
+  canCollectPayments?: boolean;
   isActive: boolean;
   createdAt: string;
 }
@@ -34,8 +52,37 @@ export interface Agency {
     maxAgents: number;
     maxPackagesPerMonth: number;
   };
+  // Booking Settings
+  bookingSettings: {
+    minimumAdvanceAmount: number; // Minimum advance required for booking
+    minimumAdvancePercentage: number; // Alternative: minimum % of total
+    usePercentage: boolean; // If true, use percentage; if false, use fixed amount
+    holdDurationMinutes: number; // Hold duration for agents (default: 60)
+    allowAgentHold: boolean; // Allow agents to create hold bookings
+    requireTransactionId: boolean; // Require transaction ID for digital payments
+  };
   isActive: boolean;
   createdAt: string;
+}
+
+// Cost item for package expense tracking
+export interface PackageCostItem {
+  id: string;
+  category: 'transport' | 'accommodation' | 'food' | 'guide' | 'entry_fees' | 'miscellaneous' | 'other';
+  description: string;
+  amount: number;
+  notes?: string;
+}
+
+// Package cost estimation and profit tracking
+export interface PackageCostEstimation {
+  costs: PackageCostItem[];
+  totalEstimatedCost: number;
+  projectedIncome: number; // Based on pricePerPerson * totalSeats
+  actualEarnings: number; // Sum of all booking totals
+  netProfit: number; // actualEarnings - totalEstimatedCost
+  profitMargin: number; // Percentage
+  lastUpdated?: string;
 }
 
 export interface TourPackage {
@@ -69,6 +116,8 @@ export interface TourPackage {
   // Bus seat layout configuration
   busConfiguration?: BusConfiguration;
   seatLayout?: SeatLayout;
+  // Cost estimation and profit tracking
+  costEstimation?: PackageCostEstimation;
 }
 
 export interface BoardingPoint {
@@ -95,12 +144,27 @@ export interface MealDay {
   dinner?: string;
 }
 
+export type BookingStatus = 'hold' | 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'expired';
+export type PaymentMethod = 'cash' | 'bkash' | 'nagad' | 'card' | 'bank' | 'other';
+export type PaymentStatus = 'unpaid' | 'advance_paid' | 'fully_paid';
+
+export interface PaymentDetails {
+  method: PaymentMethod;
+  transactionId: string; // Mandatory for all except cash
+  amount: number;
+  paidAt: string;
+  collectedBy?: string; // Agent/Admin ID who collected
+  notes?: string;
+}
+
 export interface Booking {
   id: string;
   bookingId: string; // 6-digit unique ID
   packageId: string;
   agencyId: string;
   agentId?: string;
+  agentName?: string;
+  agentType?: AgentType; // Store agent type at booking time
   guestName: string;
   guestPhone: string;
   guestEmail?: string;
@@ -115,12 +179,33 @@ export interface Booking {
   totalAmount: number;
   advancePaid: number;
   dueAmount: number;
-  paymentMethod: 'cash' | 'bkash' | 'nagad' | 'bank' | 'card';
-  paymentStatus: 'unpaid' | 'advance_paid' | 'fully_paid';
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+  // 3rd party agent price tracking
+  // Original prices (set by agency admin) - used for agency accounting
+  originalPricePerPerson: number;
+  originalSubtotal: number;
+  originalTotalAmount: number;
+  // Modified prices (by 3rd party agent) - shown on customer invoice
+  // If agent didn't modify, these equal the original values
+  modifiedPricePerPerson?: number;
+  priceModifiedByAgent?: boolean; // True if 3rd party agent modified prices
+  priceModificationPercent?: number; // The percentage change applied
+  // Enhanced payment tracking
+  paymentMethod: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  paymentHistory: PaymentDetails[]; // Track all payment transactions
+  // Hold booking fields
+  status: BookingStatus;
+  isHold: boolean; // True if booking is on hold without payment
+  holdExpiresAt?: string; // ISO timestamp when hold expires (1 hour for agents)
+  holdCreatedBy?: 'agent' | 'agency_admin';
+  // Tracking
   source: 'web' | 'whatsapp' | 'messenger' | 'phone' | 'walk-in';
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
+  confirmedAt?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
 }
 
 export interface Passenger {

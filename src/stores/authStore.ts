@@ -1,18 +1,8 @@
 // Authentication Store using Zustand
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, AuthState } from '../types';
+import { User, AuthState, Agency } from '../types';
 import { authAPI } from '../services/api';
-
-interface Agency {
-  id: string;
-  name: string;
-  nameBn?: string;
-  slug: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-}
 
 interface AuthStore extends AuthState {
   agency: Agency | null;

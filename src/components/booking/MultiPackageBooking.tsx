@@ -4,9 +4,9 @@ import { useAuthStore } from '../../stores/authStore';
 import { Card } from '../common/Card';
 import { packagesAPI, bookingsAPI } from '../../services/api';
 import { BusSeatLayoutPicker } from '../seats';
-import { SeatLayout, BusConfiguration, PassengerGender } from '../../types';
+import { SeatLayout, BusConfiguration, PassengerGender, PaymentMethod, Agency } from '../../types';
 import { HoldSeatsModal } from './HoldSeatsModal';
-import { ShoppingCart, Lock } from 'lucide-react';
+import { ShoppingCart, Lock, Clock, CreditCard, Smartphone, Banknote, Building2, CircleDollarSign, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Types
@@ -28,6 +28,7 @@ interface Package {
   advanceAmount: number;
   boardingPoints: { id: string; name: string; nameBn: string; time: string }[];
   droppingPoints: { id: string; name: string; nameBn: string }[];
+  hosts?: { id: string; name: string; nameBn?: string; mobile: string; role?: string }[];
   status: string;
   busConfiguration?: BusConfiguration;
   seatLayout?: SeatLayout;
@@ -67,12 +68,13 @@ interface MultiPackageBookingProps {
   onComplete?: () => void;
 }
 
-const PAYMENT_METHODS = [
-  { value: 'cash', label: 'Cash', labelBn: 'নগদ' },
-  { value: 'bkash', label: 'bKash', labelBn: 'বিকাশ' },
-  { value: 'nagad', label: 'Nagad', labelBn: 'নগদ' },
-  { value: 'bank', label: 'Bank Transfer', labelBn: 'ব্যাংক ট্রান্সফার' },
-  { value: 'card', label: 'Card', labelBn: 'কার্ড' },
+const PAYMENT_METHODS: { value: PaymentMethod; label: string; labelBn: string; icon: React.ReactNode; requiresTxn: boolean }[] = [
+  { value: 'cash', label: 'Cash', labelBn: 'নগদ', icon: <Banknote className="w-5 h-5" />, requiresTxn: false },
+  { value: 'bkash', label: 'bKash', labelBn: 'বিকাশ', icon: <Smartphone className="w-5 h-5" />, requiresTxn: true },
+  { value: 'nagad', label: 'Nagad', labelBn: 'নগদ', icon: <Smartphone className="w-5 h-5" />, requiresTxn: true },
+  { value: 'card', label: 'Card', labelBn: 'কার্ড', icon: <CreditCard className="w-5 h-5" />, requiresTxn: true },
+  { value: 'bank', label: 'Bank Transfer', labelBn: 'ব্যাংক', icon: <Building2 className="w-5 h-5" />, requiresTxn: true },
+  { value: 'other', label: 'Other', labelBn: 'অন্যান্য', icon: <CircleDollarSign className="w-5 h-5" />, requiresTxn: true },
 ];
 
 const SOURCE_OPTIONS = [
@@ -87,7 +89,7 @@ const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9
 
 export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRole, onComplete }) => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, agency } = useAuthStore();
 
   // State
   const [packages, setPackages] = useState<Package[]>([]);
@@ -103,7 +105,8 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
 
   // Payment state
   const [paymentData, setPaymentData] = useState({
-    paymentMethod: 'cash',
+    paymentMethod: 'cash' as PaymentMethod,
+    transactionId: '',
     advancePaid: 0,
     discountAmount: 0,
     discountReason: '',
@@ -111,8 +114,21 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     notes: '',
   });
 
+  // Hold booking state
+  const [isHoldBooking, setIsHoldBooking] = useState(false);
+
   // Hold modal state
   const [holdModalPackage, setHoldModalPackage] = useState<Package | null>(null);
+
+  // Agency settings for minimum advance
+  const bookingSettings = agency?.bookingSettings || {
+    minimumAdvanceAmount: 1000,
+    minimumAdvancePercentage: 20,
+    usePercentage: false,
+    holdDurationMinutes: 60,
+    allowAgentHold: true,
+    requireTransactionId: true,
+  };
 
   // Fetch packages on mount
   useEffect(() => {
@@ -134,6 +150,14 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     } finally {
       setLoading(false);
     }
+  };
+
+  // Calculate minimum advance required
+  const calculateMinimumAdvance = (total: number): number => {
+    if (bookingSettings.usePercentage) {
+      return Math.ceil((total * bookingSettings.minimumAdvancePercentage) / 100);
+    }
+    return bookingSettings.minimumAdvanceAmount;
   };
 
   // Add a new package booking
@@ -275,6 +299,17 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     return Math.max(0, subtotalBeforeDiscount - (paymentData.discountAmount || 0));
   }, [subtotalBeforeDiscount, paymentData.discountAmount]);
 
+  // Calculate minimum advance for this booking
+  const minimumAdvance = useMemo(() => {
+    return calculateMinimumAdvance(grandTotal);
+  }, [grandTotal, bookingSettings]);
+
+  // Check if current payment method requires transaction ID
+  const requiresTransactionId = useMemo(() => {
+    const method = PAYMENT_METHODS.find(m => m.value === paymentData.paymentMethod);
+    return method?.requiresTxn && bookingSettings.requireTransactionId;
+  }, [paymentData.paymentMethod, bookingSettings.requireTransactionId]);
+
   // Update booking field
   const updateBookingField = (bookingIndex: number, field: keyof PackageBooking, value: any) => {
     setPackageBookings(prev => {
@@ -326,11 +361,34 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
     return true;
   };
 
+  // Validate payment step
+  const validatePayment = (): boolean => {
+    // For hold bookings, no payment validation needed
+    if (isHoldBooking) {
+      return true;
+    }
+
+    // Check minimum advance
+    if (paymentData.advancePaid < minimumAdvance) {
+      toast.error(`Minimum advance of ৳${minimumAdvance.toLocaleString()} is required`);
+      return false;
+    }
+
+    // Check transaction ID for digital payments
+    if (requiresTransactionId && !paymentData.transactionId.trim()) {
+      toast.error('Transaction ID is required for this payment method');
+      return false;
+    }
+
+    return true;
+  };
+
   // Handle form submission
   const handleSubmit = async () => {
     if (!user?.agencyId) return;
 
     if (!validateStep(3)) return;
+    if (!validatePayment()) return;
 
     setSubmitting(true);
 
@@ -358,10 +416,16 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
         const bookingDiscount = Math.round(paymentData.discountAmount * discountProportion);
         const finalAmount = subtotal - bookingDiscount;
 
+        // Calculate hold expiry time (1 hour for agents)
+        const holdExpiresAt = isHoldBooking
+          ? new Date(Date.now() + bookingSettings.holdDurationMinutes * 60 * 1000).toISOString()
+          : undefined;
+
         const bookingData = {
           packageId: booking.package.id,
           agencyId: user.agencyId,
           agentId: userRole === 'sales_agent' ? user.id : undefined,
+          agentName: user.name,
           guestName: validGuests[0].name,
           guestPhone: validGuests[0].phone || '',
           guestEmail: validGuests[0].email || undefined,
@@ -374,8 +438,20 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
           discountAmount: bookingDiscount,
           discountReason: paymentData.discountReason || undefined,
           totalAmount: finalAmount,
-          advancePaid: grandTotal > 0 ? Math.round((Number(paymentData.advancePaid) / grandTotal) * finalAmount) : 0,
-          paymentMethod: paymentData.paymentMethod,
+          advancePaid: isHoldBooking ? 0 : (grandTotal > 0 ? Math.round((Number(paymentData.advancePaid) / grandTotal) * finalAmount) : 0),
+          paymentMethod: isHoldBooking ? 'cash' : paymentData.paymentMethod,
+          paymentHistory: isHoldBooking ? [] : [{
+            method: paymentData.paymentMethod,
+            transactionId: paymentData.transactionId || `CASH-${Date.now()}`,
+            amount: grandTotal > 0 ? Math.round((Number(paymentData.advancePaid) / grandTotal) * finalAmount) : 0,
+            paidAt: new Date().toISOString(),
+            collectedBy: user.id,
+          }],
+          // Hold booking fields
+          isHold: isHoldBooking,
+          status: isHoldBooking ? 'hold' : 'pending',
+          holdExpiresAt: holdExpiresAt,
+          holdCreatedBy: isHoldBooking ? (userRole === 'sales_agent' ? 'agent' : 'agency_admin') : undefined,
           source: paymentData.source,
           notes: paymentData.notes || undefined,
           selectedSeatIds: booking.selectedSeatIds.length > 0 ? booking.selectedSeatIds : undefined,
@@ -387,7 +463,11 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
       const results = await Promise.all(bookingPromises);
       const bookingIds = results.map(r => r.bookingId).join(', ');
 
-      toast.success(`Booking(s) created! IDs: ${bookingIds}`);
+      if (isHoldBooking) {
+        toast.success(`Booking(s) on HOLD! IDs: ${bookingIds}. Payment must be made within ${bookingSettings.holdDurationMinutes} minutes.`);
+      } else {
+        toast.success(`Booking(s) created! IDs: ${bookingIds}`);
+      }
 
       if (onComplete) {
         onComplete();
@@ -425,6 +505,9 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
 
   const activeBooking = packageBookings[activeBookingIndex];
   const hasPackagesWithSeats = packageBookings.some(b => b.package.seatLayout);
+
+  // Can this user create hold bookings?
+  const canCreateHoldBooking = userRole === 'sales_agent' ? bookingSettings.allowAgentHold : true;
 
   return (
     <div className="space-y-6">
@@ -1007,6 +1090,45 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
       {/* Step 4: Payment */}
       {step === 4 && (
         <div className="space-y-6">
+          {/* Hold Booking Option - Only for agents or if allowed */}
+          {canCreateHoldBooking && (
+            <Card className={`border-2 transition-all ${isHoldBooking ? 'border-amber-400 bg-amber-50' : 'border-sand-200'}`}>
+              <div className="flex items-start gap-4">
+                <button
+                  onClick={() => setIsHoldBooking(!isHoldBooking)}
+                  className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                    isHoldBooking ? 'bg-amber-500 border-amber-500 text-white' : 'border-sand-300'
+                  }`}
+                >
+                  {isHoldBooking && (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-amber-600" />
+                    <h3 className="font-semibold text-sand-800">Hold Booking Without Payment</h3>
+                  </div>
+                  <p className="text-sm text-sand-600 mt-1">
+                    Reserve the seat for <span className="font-bold text-amber-600">{bookingSettings.holdDurationMinutes} minutes</span> without collecting payment.
+                    The booking will automatically expire if payment is not received within this time.
+                  </p>
+                  {isHoldBooking && (
+                    <div className="mt-3 p-3 bg-amber-100 rounded-lg flex items-start gap-2">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-amber-800">
+                        <strong>Important:</strong> Once a hold booking is created, you cannot modify booking details.
+                        To make changes, you must cancel and create a new booking.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          )}
+
           {/* Booking Summary */}
           <Card>
             <h3 className="font-semibold text-sand-700 mb-4">
@@ -1110,71 +1232,182 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
             )}
           </Card>
 
-          {/* Payment Details */}
-          <Card>
-            <h3 className="font-semibold text-sand-700 mb-4">Payment Details</h3>
+          {/* Payment Details - Hidden for Hold Bookings */}
+          {!isHoldBooking && (
+            <Card>
+              <h3 className="font-semibold text-sand-700 mb-4">
+                Payment Details
+                <span className="font-bengali text-sand-500 font-normal ml-2">(পেমেন্টের বিবরণ)</span>
+              </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-sand-700 mb-1">Payment Method</label>
-                <select
-                  value={paymentData.paymentMethod}
-                  onChange={(e) => setPaymentData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                >
-                  {PAYMENT_METHODS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+              {/* Payment Method Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-sand-700 mb-3">Payment Method *</label>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {PAYMENT_METHODS.map((method) => (
+                    <button
+                      key={method.value}
+                      type="button"
+                      onClick={() => setPaymentData(prev => ({ ...prev, paymentMethod: method.value, transactionId: '' }))}
+                      className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                        paymentData.paymentMethod === method.value
+                          ? 'border-primary-500 bg-primary-50 text-primary-700'
+                          : 'border-sand-200 hover:border-sand-300 text-sand-600'
+                      }`}
+                    >
+                      {method.icon}
+                      <span className="text-sm font-medium">{method.label}</span>
+                      <span className="text-xs font-bengali">{method.labelBn}</span>
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-sand-700 mb-1">Source</label>
-                <select
-                  value={paymentData.source}
-                  onChange={(e) => setPaymentData(prev => ({ ...prev, source: e.target.value }))}
-                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                >
-                  {SOURCE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-sand-700 mb-1">
-                  Advance Paid
-                </label>
-                <input
-                  type="number"
-                  value={paymentData.advancePaid}
-                  onChange={(e) => setPaymentData(prev => ({ ...prev, advancePaid: Number(e.target.value) }))}
-                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  min={0}
-                  max={grandTotal}
-                />
-              </div>
-              <div className="flex items-end">
-                <div className="w-full p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-                  <div className="flex justify-between items-center">
-                    <span className="text-yellow-800 font-medium">Due Amount</span>
-                    <span className="text-xl font-bold text-yellow-700">
-                      {formatCurrency(grandTotal - (paymentData.advancePaid || 0))}
-                    </span>
+
+              {/* Transaction ID - Required for digital payments */}
+              {requiresTransactionId && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <label className="block text-sm font-medium text-blue-800 mb-2">
+                    Transaction ID / Reference Number *
+                    <span className="font-bengali ml-2">(ট্রানজেকশন আইডি)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentData.transactionId}
+                    onChange={(e) => setPaymentData(prev => ({ ...prev, transactionId: e.target.value.toUpperCase() }))}
+                    className="w-full px-4 py-3 border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    placeholder={`Enter ${paymentData.paymentMethod} transaction ID...`}
+                    required
+                  />
+                  <p className="text-xs text-blue-600 mt-2">
+                    Please enter the transaction reference from your {paymentData.paymentMethod} payment
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-sand-700 mb-1">
+                    Advance Amount *
+                    <span className="text-xs text-sand-500 ml-2">(Min: {formatCurrency(minimumAdvance)})</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={paymentData.advancePaid}
+                    onChange={(e) => setPaymentData(prev => ({ ...prev, advancePaid: Number(e.target.value) }))}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:border-transparent ${
+                      paymentData.advancePaid < minimumAdvance
+                        ? 'border-red-300 focus:ring-red-500'
+                        : 'border-sand-200 focus:ring-primary-500'
+                    }`}
+                    min={minimumAdvance}
+                    max={grandTotal}
+                  />
+                  {paymentData.advancePaid < minimumAdvance && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Minimum advance of {formatCurrency(minimumAdvance)} is required
+                    </p>
+                  )}
+                  {/* Quick amount buttons */}
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentData(prev => ({ ...prev, advancePaid: minimumAdvance }))}
+                      className="px-3 py-1 text-xs bg-sand-100 hover:bg-sand-200 rounded-lg"
+                    >
+                      Min ({formatCurrency(minimumAdvance)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentData(prev => ({ ...prev, advancePaid: Math.round(grandTotal / 2) }))}
+                      className="px-3 py-1 text-xs bg-sand-100 hover:bg-sand-200 rounded-lg"
+                    >
+                      50%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentData(prev => ({ ...prev, advancePaid: grandTotal }))}
+                      className="px-3 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"
+                    >
+                      Full ({formatCurrency(grandTotal)})
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-end">
+                  <div className="w-full p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+                    <div className="flex justify-between items-center">
+                      <span className="text-yellow-800 font-medium">Due Amount</span>
+                      <span className="text-xl font-bold text-yellow-700">
+                        {formatCurrency(grandTotal - (paymentData.advancePaid || 0))}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-sand-700 mb-1">Notes</label>
-              <textarea
-                value={paymentData.notes}
-                onChange={(e) => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
-                rows={3}
-                className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="Any special requests or notes..."
-              />
-            </div>
-          </Card>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="block text-sm font-medium text-sand-700 mb-1">Booking Source</label>
+                  <select
+                    value={paymentData.source}
+                    onChange={(e) => setPaymentData(prev => ({ ...prev, source: e.target.value }))}
+                    className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    {SOURCE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-sand-700 mb-1">Notes</label>
+                <textarea
+                  value={paymentData.notes}
+                  onChange={(e) => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-sand-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="Any special requests or notes..."
+                />
+              </div>
+            </Card>
+          )}
+
+          {/* Hold Booking Summary - Shown only for hold bookings */}
+          {isHoldBooking && (
+            <Card className="bg-amber-50 border-2 border-amber-200">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-amber-100 rounded-full">
+                  <Clock className="w-6 h-6 text-amber-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-amber-800">Hold Booking Summary</h3>
+                  <p className="text-amber-700 mt-2">
+                    This booking will be held for <strong>{bookingSettings.holdDurationMinutes} minutes</strong>.
+                  </p>
+                  <div className="mt-4 p-3 bg-white rounded-lg border border-amber-200">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-sand-500">Hold Duration</p>
+                        <p className="font-bold text-amber-700">{bookingSettings.holdDurationMinutes} minutes</p>
+                      </div>
+                      <div>
+                        <p className="text-sand-500">Amount Due</p>
+                        <p className="font-bold text-primary-600">{formatCurrency(grandTotal)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sand-500">Status</p>
+                        <p className="font-bold text-amber-600">ON HOLD</p>
+                      </div>
+                      <div>
+                        <p className="text-sand-500">Payment Required</p>
+                        <p className="font-bold text-red-600">Before expiry</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Navigation */}
           <div className="flex gap-4">
@@ -1189,9 +1422,25 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
               type="button"
               onClick={handleSubmit}
               disabled={submitting}
-              className="flex-1 px-6 py-3 bg-gradient-festive text-white rounded-xl font-medium hover:shadow-festive disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className={`flex-1 px-6 py-3 rounded-xl font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 ${
+                isHoldBooking
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white'
+                  : 'bg-gradient-festive text-white hover:shadow-festive'
+              }`}
             >
-              {submitting ? 'Creating Booking...' : `Create ${packageBookings.length > 1 ? `${packageBookings.length} Bookings` : 'Booking'}`}
+              {submitting ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  Creating...
+                </>
+              ) : isHoldBooking ? (
+                <>
+                  <Clock className="w-5 h-5" />
+                  Create Hold Booking
+                </>
+              ) : (
+                `Create ${packageBookings.length > 1 ? `${packageBookings.length} Bookings` : 'Booking'}`
+              )}
             </button>
           </div>
         </div>

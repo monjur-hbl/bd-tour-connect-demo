@@ -8,6 +8,7 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 
 // Pages
 import { LoginPage } from './pages/auth/LoginPage';
+import { FacebookCallback } from './pages/auth/FacebookCallback';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AgenciesManagement } from './pages/admin/AgenciesManagement';
 import { UsersManagement } from './pages/admin/UsersManagement';
@@ -65,6 +66,7 @@ const App: React.FC = () => {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/facebook/callback" element={<FacebookCallback />} />
 
         {/* Admin Routes */}
         <Route

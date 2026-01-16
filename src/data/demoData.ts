@@ -79,6 +79,14 @@ export const DEMO_AGENCIES: Agency[] = [
       maxAgents: 10,
       maxPackagesPerMonth: 50
     },
+    bookingSettings: {
+      minimumAdvanceAmount: 1000,
+      minimumAdvancePercentage: 20,
+      usePercentage: false,
+      holdDurationMinutes: 60,
+      allowAgentHold: true,
+      requireTransactionId: true
+    },
     isActive: true,
     createdAt: '2024-01-15T00:00:00Z'
   },
@@ -99,6 +107,14 @@ export const DEMO_AGENCIES: Agency[] = [
       maxAgents: 3,
       maxPackagesPerMonth: 10
     },
+    bookingSettings: {
+      minimumAdvanceAmount: 500,
+      minimumAdvancePercentage: 15,
+      usePercentage: true,
+      holdDurationMinutes: 30,
+      allowAgentHold: true,
+      requireTransactionId: true
+    },
     isActive: true,
     createdAt: '2024-02-01T00:00:00Z'
   },
@@ -118,6 +134,14 @@ export const DEMO_AGENCIES: Agency[] = [
       plan: 'enterprise',
       maxAgents: 25,
       maxPackagesPerMonth: 100
+    },
+    bookingSettings: {
+      minimumAdvanceAmount: 2000,
+      minimumAdvancePercentage: 25,
+      usePercentage: false,
+      holdDurationMinutes: 120,
+      allowAgentHold: true,
+      requireTransactionId: true
     },
     isActive: true,
     createdAt: '2024-01-20T00:00:00Z'
@@ -302,9 +326,16 @@ export const DEMO_BOOKINGS: Booking[] = [
     totalAmount: 14500,
     advancePaid: 6000,
     dueAmount: 8500,
+    originalPricePerPerson: 5500,
+    originalSubtotal: 14500,
+    originalTotalAmount: 14500,
     paymentMethod: 'bkash',
     paymentStatus: 'advance_paid',
+    paymentHistory: [
+      { amount: 6000, method: 'bkash', transactionId: 'BK123456789', collectedBy: 'agent-001', paidAt: '2024-02-01T10:30:00Z', notes: 'Advance payment' }
+    ],
     status: 'confirmed',
+    isHold: false,
     source: 'walk-in',
     notes: 'Family trip - needs connected seats',
     createdAt: '2024-02-01T10:30:00Z'
@@ -330,9 +361,16 @@ export const DEMO_BOOKINGS: Booking[] = [
     totalAmount: 10000,
     advancePaid: 10000,
     dueAmount: 0,
+    originalPricePerPerson: 5000,
+    originalSubtotal: 10000,
+    originalTotalAmount: 10000,
     paymentMethod: 'nagad',
     paymentStatus: 'fully_paid',
+    paymentHistory: [
+      { amount: 10000, method: 'nagad', transactionId: 'NG987654321', collectedBy: 'agent-001', paidAt: '2024-02-02T14:00:00Z', notes: 'Full payment' }
+    ],
     status: 'confirmed',
+    isHold: false,
     source: 'whatsapp',
     createdAt: '2024-02-02T14:00:00Z'
   },
@@ -354,9 +392,16 @@ export const DEMO_BOOKINGS: Booking[] = [
     totalAmount: 8500,
     advancePaid: 3000,
     dueAmount: 5500,
+    originalPricePerPerson: 8500,
+    originalSubtotal: 8500,
+    originalTotalAmount: 8500,
     paymentMethod: 'cash',
     paymentStatus: 'advance_paid',
+    paymentHistory: [
+      { amount: 3000, method: 'cash', transactionId: '', collectedBy: 'agent-001', paidAt: '2024-02-03T09:15:00Z', notes: 'Cash advance' }
+    ],
     status: 'pending',
+    isHold: false,
     source: 'phone',
     createdAt: '2024-02-03T09:15:00Z'
   },
@@ -377,9 +422,16 @@ export const DEMO_BOOKINGS: Booking[] = [
     totalAmount: 5500,
     advancePaid: 2000,
     dueAmount: 3500,
+    originalPricePerPerson: 5500,
+    originalSubtotal: 5500,
+    originalTotalAmount: 5500,
     paymentMethod: 'bkash',
     paymentStatus: 'advance_paid',
+    paymentHistory: [
+      { amount: 2000, method: 'bkash', transactionId: 'BK555444333', collectedBy: 'agent-001', paidAt: '2024-02-04T16:45:00Z', notes: 'Online advance' }
+    ],
     status: 'confirmed',
+    isHold: false,
     source: 'web',
     createdAt: '2024-02-04T16:45:00Z'
   },
@@ -404,9 +456,16 @@ export const DEMO_BOOKINGS: Booking[] = [
     totalAmount: 18000,
     advancePaid: 8000,
     dueAmount: 10000,
+    originalPricePerPerson: 5500,
+    originalSubtotal: 18000,
+    originalTotalAmount: 18000,
     paymentMethod: 'bank',
     paymentStatus: 'advance_paid',
+    paymentHistory: [
+      { amount: 8000, method: 'bank', transactionId: 'BANK-20240205-001', collectedBy: 'agent-001', paidAt: '2024-02-05T11:20:00Z', notes: 'Bank transfer advance' }
+    ],
     status: 'confirmed',
+    isHold: false,
     source: 'messenger',
     notes: 'Large family - needs 4 connected seats',
     createdAt: '2024-02-05T11:20:00Z'
