@@ -548,7 +548,10 @@ export const MultiPackageBooking: React.FC<MultiPackageBookingProps> = ({ userRo
   const hasPackagesWithSeats = packageBookings.some(b => b.package.seatLayout);
 
   // Can this user create hold bookings?
-  const canCreateHoldBooking = userRole === 'sales_agent' ? bookingSettings.allowAgentHold : true;
+  // Check both agency setting and per-agent permission
+  const canCreateHoldBooking = userRole === 'sales_agent'
+    ? (bookingSettings.allowAgentHold && user?.canCreateHoldBookings !== false)
+    : true;
 
   return (
     <div className="space-y-6">

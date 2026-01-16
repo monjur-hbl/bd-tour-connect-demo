@@ -15,6 +15,7 @@ import {
   UserX,
   Building2,
   Percent,
+  Clock,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AgentType, AgentAccountSettings } from '../../types';
@@ -33,6 +34,7 @@ interface Agent {
   canCancelBookings?: boolean;
   canDeleteBookings?: boolean;
   canCollectPayments?: boolean;
+  canCreateHoldBookings?: boolean;
   isActive: boolean;
   createdAt: string;
 }
@@ -82,6 +84,7 @@ export const AgentManagement: React.FC = () => {
     canModifyPrices: false,
     priceModificationLimit: 10, // 10% default
     canCollectPayments: true,
+    canCreateHoldBookings: true, // Allow agent to create hold bookings
   });
 
   const [showBalanceModal, setShowBalanceModal] = useState(false);
@@ -122,6 +125,7 @@ export const AgentManagement: React.FC = () => {
         canModifyPrices: agent.agentAccountSettings?.canModifyPrices || false,
         priceModificationLimit: agent.agentAccountSettings?.priceModificationLimit || 10,
         canCollectPayments: agent.canCollectPayments ?? true,
+        canCreateHoldBookings: agent.canCreateHoldBookings ?? true,
       });
     } else {
       setEditingAgent(null);
@@ -138,6 +142,7 @@ export const AgentManagement: React.FC = () => {
         canModifyPrices: false,
         priceModificationLimit: 10,
         canCollectPayments: true,
+        canCreateHoldBookings: true,
       });
     }
     setShowModal(true);
@@ -244,6 +249,7 @@ export const AgentManagement: React.FC = () => {
           agentType: formData.agentType,
           agentAccountSettings,
           canCollectPayments: formData.canCollectPayments,
+          canCreateHoldBookings: formData.canCreateHoldBookings,
           // In-house agents cannot modify bookings with payments
           canModifyBookings: false,
           canCancelBookings: false,
@@ -265,6 +271,7 @@ export const AgentManagement: React.FC = () => {
           agentType: formData.agentType,
           agentAccountSettings,
           canCollectPayments: formData.canCollectPayments,
+          canCreateHoldBookings: formData.canCreateHoldBookings,
           canModifyBookings: false,
           canCancelBookings: false,
           canDeleteBookings: false,
@@ -435,6 +442,20 @@ export const AgentManagement: React.FC = () => {
                             ±{settings.priceModificationLimit}% price mod
                           </p>
                         )}
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {agent.canCreateHoldBookings !== false && (
+                            <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              Hold
+                            </span>
+                          )}
+                          {agent.canCollectPayments !== false && (
+                            <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded flex items-center gap-1">
+                              <DollarSign className="w-3 h-3" />
+                              Payment
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="py-4 px-4">
@@ -755,6 +776,54 @@ export const AgentManagement: React.FC = () => {
                     <strong>Agent Restrictions:</strong> Agents cannot modify, cancel, or delete bookings with payment.
                     Only hold bookings (without payment) can be modified by agents.
                   </p>
+                </div>
+              </div>
+
+              {/* Additional Capabilities */}
+              <div>
+                <label className="block text-sm font-medium text-sand-700 mb-2">
+                  Additional Capabilities <span className="font-bengali">(অতিরিক্ত ক্ষমতা)</span>
+                </label>
+                <div className="space-y-2">
+                  {/* Hold Booking Permission */}
+                  <label className="flex items-center gap-3 p-3 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors border border-amber-200">
+                    <input
+                      type="checkbox"
+                      checked={formData.canCreateHoldBookings}
+                      onChange={(e) => setFormData(prev => ({ ...prev, canCreateHoldBookings: e.target.checked }))}
+                      className="w-5 h-5 text-amber-500 rounded focus:ring-amber-500"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-600" />
+                        <span className="text-sand-800 font-medium">Can Create Hold Bookings</span>
+                        <span className="text-sand-500 text-sm font-bengali">(হোল্ড বুকিং)</span>
+                      </div>
+                      <p className="text-xs text-amber-700 mt-1">
+                        Allow agent to reserve seats without immediate payment
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Collect Payments */}
+                  <label className="flex items-center gap-3 p-3 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 transition-colors border border-green-200">
+                    <input
+                      type="checkbox"
+                      checked={formData.canCollectPayments}
+                      onChange={(e) => setFormData(prev => ({ ...prev, canCollectPayments: e.target.checked }))}
+                      className="w-5 h-5 text-green-500 rounded focus:ring-green-500"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-green-600" />
+                        <span className="text-sand-800 font-medium">Can Collect Payments</span>
+                        <span className="text-sand-500 text-sm font-bengali">(পেমেন্ট সংগ্রহ)</span>
+                      </div>
+                      <p className="text-xs text-green-700 mt-1">
+                        Allow agent to receive and record customer payments
+                      </p>
+                    </div>
+                  </label>
                 </div>
               </div>
 

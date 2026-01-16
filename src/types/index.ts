@@ -30,6 +30,7 @@ export interface User {
   canCancelBookings?: boolean;
   canDeleteBookings?: boolean;
   canCollectPayments?: boolean;
+  canCreateHoldBookings?: boolean; // Allow agent to create hold bookings
   isActive: boolean;
   createdAt: string;
 }
