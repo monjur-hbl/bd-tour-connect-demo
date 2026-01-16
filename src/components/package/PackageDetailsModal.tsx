@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SeatAvailabilityViewer } from '../seats';
-import { SeatLayout, BusConfiguration } from '../../types';
+import { SeatLayout, BusConfiguration, PackageCostEstimation as CostEstimationType } from '../../types';
+import { PackageCostEstimation } from './PackageCostEstimation';
 
 interface PackageData {
   id: string;
@@ -27,6 +28,7 @@ interface PackageData {
   status: string;
   busConfiguration?: BusConfiguration;
   seatLayout?: SeatLayout;
+  costEstimation?: CostEstimationType;
 }
 
 interface PackageDetailsModalProps {
@@ -34,6 +36,8 @@ interface PackageDetailsModalProps {
   onClose: () => void;
   onBook?: () => void;
   showBilingual?: boolean;
+  showCostProfit?: boolean; // Only for agency admin
+  onCostUpdate?: (costEstimation: CostEstimationType) => void;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
@@ -41,8 +45,11 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   onClose,
   onBook,
   showBilingual = true,
+  showCostProfit = false,
+  onCostUpdate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'details' | 'seats'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'seats' | 'cost'>('details');
+  const [costEstimation, setCostEstimation] = useState<CostEstimationType | undefined>(pkg.costEstimation);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-GB', {
@@ -141,6 +148,28 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />
               )}
             </button>
+
+            {showCostProfit && (
+              <button
+                onClick={() => setActiveTab('cost')}
+                className={`px-6 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'cost'
+                    ? 'text-primary-600'
+                    : 'text-sand-500 hover:text-sand-700'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <span>Cost & Profit</span>
+                  {showBilingual && <span className="font-bengali text-xs">(খরচ ও লাভ)</span>}
+                </div>
+                {activeTab === 'cost' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />
+                )}
+              </button>
+            )}
           </div>
         </div>
 
@@ -348,7 +377,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'seats' ? (
             <div>
               {hasSeatLayout ? (
                 <SeatAvailabilityViewer
@@ -365,6 +394,19 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 </div>
               )}
             </div>
+          ) : (
+            /* Cost & Profit Tab */
+            <PackageCostEstimation
+              packageId={pkg.id}
+              pricePerPerson={pkg.pricePerPerson}
+              totalSeats={pkg.totalSeats}
+              bookedSeats={pkg.totalSeats - pkg.availableSeats}
+              costEstimation={costEstimation}
+              onSave={async (data) => {
+                setCostEstimation(data);
+                onCostUpdate?.(data);
+              }}
+            />
           )}
         </div>
 

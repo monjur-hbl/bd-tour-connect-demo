@@ -1011,6 +1011,17 @@ export const PackageManagement: React.FC = () => {
             handleCreateBooking(selectedPackage);
           }}
           showBilingual={true}
+          showCostProfit={true}
+          onCostUpdate={async (costData) => {
+            // Save cost estimation to package
+            try {
+              await packagesAPI.update(selectedPackage.id, { costEstimation: costData });
+              toast.success('Cost estimation saved');
+              fetchPackages();
+            } catch (error) {
+              toast.error('Failed to save cost estimation');
+            }
+          }}
         />
       )}
 
